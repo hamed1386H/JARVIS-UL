@@ -19,9 +19,6 @@ import android.media.MediaRecorder
 import android.net.Uri
 import android.os.Bundle
 import android.provider.Settings
-import android.speech.RecognizerIntent
-import android.speech.SpeechRecognizer
-import android.speech.RecognitionListener
 import android.speech.tts.TextToSpeech
 import android.speech.tts.UtteranceProgressListener
 import android.view.Gravity
@@ -45,11 +42,9 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
     private lateinit var input: EditText
     private lateinit var tts: TextToSpeech
     private var ttsReady = false
-    private var speechRecognizer: SpeechRecognizer? = null
     private var wakeMode = false
     private val executor = Executors.newSingleThreadExecutor()
     private val prefs by lazy { getSharedPreferences("cht_ai", Context.MODE_PRIVATE) }
-    private val requestSpeech = 101
     private val requestMic = 102
     private val requestCorePermissions = 103
     private var permissionStatusView: TextView? = null
@@ -221,6 +216,15 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
             setOnClickListener { showBackgroundPersistenceOptions() }
         }
         content.addView(persistenceButton)
+        content.addView(Button(this).apply {
+            text = "۵) اجازه اعلان‌های JARVIS"
+            isAllCaps = false
+            setOnClickListener {
+                if (android.os.Build.VERSION.SDK_INT >= 33 && ContextCompat.checkSelfPermission(this@MainActivity, Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED)
+                    ActivityCompat.requestPermissions(this@MainActivity, arrayOf(Manifest.permission.POST_NOTIFICATIONS), 107)
+                else reply("مجوز اعلان‌ها از قبل فعال است")
+            }
+        })
         updatePermissionStatus()
         AlertDialog.Builder(this)
             .setTitle("مرکز مجوزهای JARVIS")
@@ -364,17 +368,33 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
     }
 
     private fun promptWhisperModelDownload() {
-        val choices = arrayOf("دانلود با دانلودر گوشی", "ارسال لینک به ADM", "کپی لینک مستقیم", "انتخاب فایل دانلودشده", "بعداً")
+        val choices = arrayOf("دانلود با Google Chrome", "دانلود با دانلودر گوشی", "ارسال لینک به ADM", "کپی لینک مستقیم", "انتخاب فایل دانلودشده", "بعداً")
         AlertDialog.Builder(this).setTitle("مدل تشخیص صدای فارسی Whisper")
             .setMessage("مدل فارسی Whisper Base حدود ۸۲ مگابایت است. می‌توانی آن را با ADM دریافت کنی و بعد فایل را انتخاب کنی.")
             .setItems(choices) { _, which ->
                 when (which) {
-                    0 -> enqueueWhisperDownload()
-                    1 -> shareWhisperModelLink()
-                    2 -> copyWhisperModelLink()
-                    3 -> selectWhisperModelFile()
+                    0 -> openWhisperInChrome()
+                    1 -> enqueueWhisperDownload()
+                    2 -> shareWhisperModelLink()
+                    3 -> copyWhisperModelLink()
+                    4 -> selectWhisperModelFile()
                 }
             }.show()
+    }
+
+    private fun openWhisperInChrome() {
+        val view = Intent(Intent.ACTION_VIEW, Uri.parse(WHISPER_MODEL_URL)).apply {
+            addCategory(Intent.CATEGORY_BROWSABLE)
+            setPackage("com.android.chrome")
+        }
+        try {
+            startActivity(view)
+            reply("لینک مدل در Google Chrome باز شد؛ پس از دانلود، فایل را از تنظیمات JARVIS انتخاب کن.")
+        } catch (_: Exception) {
+            val fallback = Intent(Intent.ACTION_VIEW, Uri.parse(WHISPER_MODEL_URL)).apply { addCategory(Intent.CATEGORY_BROWSABLE) }
+            try { startActivity(Intent.createChooser(fallback, "انتخاب مرورگر برای دانلود مدل")) }
+            catch (_: Exception) { reply("مرورگر سازگار پیدا نشد؛ از گزینه ADM یا کپی لینک استفاده کن.") }
+        }
     }
 
     private fun shareWhisperModelLink() {
@@ -465,7 +485,6 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
             reply("سرویس گوش‌به‌زنگ متوقف شد")
             return
         }
-        if (!SpeechRecognizer.isRecognitionAvailable(this)) { reply("سرویس تشخیص گفتار روی گوشی در دسترس نیست"); return }
         if (ContextCompat.checkSelfPermission(this, Manifest.permission.RECORD_AUDIO) != PackageManager.PERMISSION_GRANTED) {
             ActivityCompat.requestPermissions(this, arrayOf(Manifest.permission.RECORD_AUDIO), requestMic)
             return
@@ -636,6 +655,11 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
 
     private fun toggleTorch() = setTorch(!torchOn)
     private fun setTorch(enabled: Boolean) {
+        if (ContextCompat.checkSelfPermission(this, Manifest.permission.CAMERA) != PackageManager.PERMISSION_GRANTED) {
+            ActivityCompat.requestPermissions(this, arrayOf(Manifest.permission.CAMERA), requestCorePermissions)
+            reply("برای کنترل چراغ‌قوه، مجوز دوربین لازم است؛ اجازه رسمی اندروید را تأیید کن.")
+            return
+        }
         try {
             val manager = getSystemService(CAMERA_SERVICE) as CameraManager
             val cameraId = manager.cameraIdList.firstOrNull { manager.getCameraCharacteristics(it).get(android.hardware.camera2.CameraCharacteristics.FLASH_INFO_AVAILABLE) == true }
@@ -1084,8 +1108,6 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
             try { unregisterReceiver(modelDownloadReceiver) } catch (_: Exception) { }
             modelReceiverRegistered = false
         }
-        try { speechRecognizer?.cancel(); speechRecognizer?.destroy() } catch (_: Exception) { }
-        speechRecognizer = null
         if (::tts.isInitialized) { tts.stop(); tts.shutdown() }
         // Queue native cleanup behind any active inference to avoid freeing the model mid-generation.
         try {
