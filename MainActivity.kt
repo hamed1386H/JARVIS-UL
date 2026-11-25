@@ -313,69 +313,50 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
 
     private fun beginListening() {
         if (ContextCompat.checkSelfPermission(this, Manifest.permission.RECORD_AUDIO) != PackageManager.PERMISSION_GRANTED) {
-            ActivityCompat.requestPermissions(this, arrayOf(Manifest.permission.RECORD_AUDIO), requestMic)
-            return
+            ActivityCompat.requestPermissions(this, arrayOf(Manifest.permission.RECORD_AUDIO), requestMic); return
         }
-        if (!SpeechRecognizer.isRecognitionAvailable(this)) {
-            reply("موتور تشخیص گفتار روی گوشی در دسترس نیست")
-            return
+        if (!WhisperEngine.isAvailable()) { reply("کتابخانه Whisper در این نسخه وجود ندارد."); return }
+        if (!whisper.isLoaded()) {
+            if (whisperModelFile.isFile && whisperModelFile.length() > 50000000L) { loadWhisperModel(whisperModelFile); return }
+            promptWhisperModelDownload(); return
         }
-        try {
-            speechRecognizer?.cancel()
-            speechRecognizer?.destroy()
-            speechRecognizer = SpeechRecognizer.createSpeechRecognizer(this)
-            speechRecognizer?.setRecognitionListener(object : RecognitionListener {
-                override fun onReadyForSpeech(params: Bundle?) {
-                    status.text = "JARVIS گوش می‌دهد…"; orbView.setMode(JarvisOrbView.Mode.LISTENING)
-                }
-                override fun onBeginningOfSpeech() {
-                    status.text = "صدایت را دریافت کردم…"; orbView.setMode(JarvisOrbView.Mode.LISTENING)
-                }
-                override fun onRmsChanged(rmsdB: Float) {}
-                override fun onBufferReceived(buffer: ByteArray?) {}
-                override fun onEndOfSpeech() {
-                    status.text = "در حال تشخیص گفتار…"; orbView.setMode(JarvisOrbView.Mode.THINKING)
-                }
-                override fun onError(error: Int) {
-                    status.text = when (error) {
-                        SpeechRecognizer.ERROR_NO_MATCH, SpeechRecognizer.ERROR_SPEECH_TIMEOUT -> "صدایی تشخیص داده نشد؛ دوباره تلاش کن"
-                        SpeechRecognizer.ERROR_INSUFFICIENT_PERMISSIONS -> "مجوز میکروفون لازم است"
-                        else -> "تشخیص گفتار ناموفق بود؛ دوباره تلاش کن"
-                    }
-                    speechRecognizer?.destroy()
-                    speechRecognizer = null
-                }
-                override fun onResults(results: Bundle?) {
-                    val words = results?.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION)?.firstOrNull().orEmpty()
-                    speechRecognizer?.destroy()
-                    speechRecognizer = null
-                    if (words.isNotBlank()) {
-                        addLog("شما", words)
-                        handleCommand(words)
-                    } else {
-                        status.text = "متوجه صحبتت نشدم؛ دوباره بگو"
-                    }
-                }
-                override fun onPartialResults(partialResults: Bundle?) {
-                    val partial = partialResults?.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION)?.firstOrNull()
-                    if (!partial.isNullOrBlank()) status.text = partial
-                }
-                override fun onEvent(eventType: Int, params: Bundle?) {}
-            })
-            val request = Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH).apply {
-                putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM)
-                putExtra(RecognizerIntent.EXTRA_LANGUAGE, "fa-IR")
-                putExtra(RecognizerIntent.EXTRA_PARTIAL_RESULTS, true)
-                putExtra(RecognizerIntent.EXTRA_MAX_RESULTS, 3)
-            }
-            speechRecognizer?.startListening(request)
-        } catch (_: Exception) {
-            speechRecognizer?.destroy()
-            speechRecognizer = null
-            reply("شروع تشخیص گفتار ممکن نشد")
-        }
+        captureAndTranscribe()
     }
 
+    private fun captureAndTranscribe() {
+        if (!activityVisible || !whisper.isLoaded()) return
+        status.text = "JARVIS گوش می‌دهد…"; orbView.setMode(JarvisOrbView.Mode.LISTENING)
+        executor.execute {
+            var recorder: AudioRecord? = null
+            try {
+                val rate = 16000
+                val minBuffer = AudioRecord.getMinBufferSize(rate, AudioFormat.CHANNEL_IN_MONO, AudioFormat.ENCODING_PCM_16BIT)
+                check(minBuffer > 0) { "ضبط صدای ۱۶ کیلوهرتز در دسترس نیست." }
+                recorder = AudioRecord(MediaRecorder.AudioSource.VOICE_RECOGNITION, rate, AudioFormat.CHANNEL_IN_MONO, AudioFormat.ENCODING_PCM_16BIT, maxOf(minBuffer, 6400))
+                check(recorder.state == AudioRecord.STATE_INITIALIZED) { "میکروفون آماده نشد." }
+                val chunk = ShortArray(320); val samples = ArrayList<Float>(rate * 12)
+                var started = false; var silence = 0; var elapsed = 0
+                recorder.startRecording()
+                while (elapsed < 15000 && (!started || silence < 850)) {
+                    val n = recorder.read(chunk, 0, chunk.size); if (n <= 0) continue
+                    var energy = 0.0
+                    for (i in 0 until n) { val v = chunk[i].toFloat() / 32768f; samples.add(v); energy += chunk[i].toDouble() * chunk[i].toDouble() }
+                    val rms = kotlin.math.sqrt(energy / n).toInt()
+                    if (rms > 420) { started = true; silence = 0 } else if (started) silence += n * 1000 / rate
+                    elapsed += n * 1000 / rate
+                    val level = (rms / 5000f).coerceIn(0f, 1f)
+                    runOnUiThread { orbView.setAudioLevel(level) }
+                }
+                recorder.stop()
+                val audio = FloatArray(samples.size) { samples[it] }
+                runOnUiThread { orbView.setAudioLevel(0f); orbView.setMode(JarvisOrbView.Mode.THINKING); status.text = "در حال تشخیص فارسی با Whisper…" }
+                if (audio.size < rate / 2) { runOnUiThread { status.text = "صدایی دریافت نشد؛ دوباره صحبت کن"; orbView.setMode(JarvisOrbView.Mode.IDLE) }; return@execute }
+                val words = whisper.transcribe(audio)
+                runOnUiThread { if (words.isNotBlank()) { addLog("شما", words); handleCommand(words) } else { status.text = "متوجه صحبتت نشدم؛ دوباره بگو"; orbView.setMode(JarvisOrbView.Mode.IDLE) } }
+            } catch (e: Exception) { runOnUiThread { reply("تشخیص صدای Whisper ناموفق بود: " + (e.message ?: "خطای ناشناخته")) } }
+            finally { try { recorder?.release() } catch (_: Exception) {}; runOnUiThread { orbView.setAudioLevel(0f) } }
+        }
+    }
     private fun toggleWakeMode() {
         if (isWakeServiceRunning()) {
             stopService(Intent(this, WakeWordService::class.java))
