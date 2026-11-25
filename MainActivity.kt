@@ -499,19 +499,64 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
         )
     }
 
-    private fun showModelDownloadDialog(title: String, description: String, url: String, fileName: String, isWhisper: Boolean) {
-        val choices = arrayOf("دانلود با برنامه دلخواه (Chrome / ADM)", "دانلود مستقیم داخل JARVIS", "کپی لینک مستقیم", "بعداً")
-        AlertDialog.Builder(this).setTitle(title).setMessage("$description\n\nلینک مستقیم:\n$url")
-            .setItems(choices) { _, which ->
-                when (which) {
-                    0 -> {
-                        prefs.edit().putString("pending_external_model", if (isWhisper) "whisper" else "qwen").apply()
-                        ensureDownloadFolderPermissionThenChooseApp()
-                    }
-                    1 -> if (isWhisper) enqueueWhisperDownload() else enqueueRecommendedModelDownload()
-                    2 -> copyDirectModelLink(url, fileName)
-                }
-            }.show()
+    private fun showModelDownloadDialog(
+        title: String,
+        description: String,
+        url: String,
+        fileName: String,
+        isWhisper: Boolean
+    ) {
+        val panel = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(dp(20), dp(8), dp(20), dp(4))
+        }
+        panel.addView(TextView(this).apply {
+            text = description
+            textSize = 14f
+            setTextColor(Color.rgb(220, 226, 248))
+            setLineSpacing(dp(4).toFloat(), 1f)
+        })
+        panel.addView(TextView(this).apply {
+            text = "لینک مستقیم دانلود"
+            textSize = 12f
+            setTextColor(Color.rgb(154, 174, 238))
+            setPadding(0, dp(14), 0, dp(5))
+        })
+        panel.addView(TextView(this).apply {
+            text = url
+            textSize = 11f
+            setTextColor(Color.rgb(111, 215, 229))
+            textIsSelectable = true
+            setTextIsSelectable(true)
+            setPadding(dp(10), dp(10), dp(10), dp(10))
+            background = glass(Color.rgb(7, 12, 27), Color.rgb(45, 70, 112), 12)
+        })
+        panel.addView(Button(this).apply {
+            text = "کپی لینک مستقیم"
+            isAllCaps = false
+            setOnClickListener { copyDirectModelLink(url, fileName) }
+        }, LinearLayout.LayoutParams(-1, dp(44)).apply { topMargin = dp(9) })
+        panel.addView(Button(this).apply {
+            text = "انتخاب فایل مدل از گوشی"
+            isAllCaps = false
+            setOnClickListener {
+                if (isWhisper) selectWhisperModelFile() else selectLocalModel()
+            }
+        }, LinearLayout.LayoutParams(-1, dp(44)).apply { topMargin = dp(5) })
+
+        val dialog = AlertDialog.Builder(this)
+            .setTitle(title)
+            .setView(panel)
+            .setPositiveButton("انتخاب برنامه دانلود") { _, _ ->
+                prefs.edit().putString("pending_external_model", if (isWhisper) "whisper" else "qwen").apply()
+                ensureDownloadFolderPermissionThenChooseApp()
+            }
+            .setNeutralButton("دانلود مستقیم داخل JARVIS") { _, _ ->
+                if (isWhisper) enqueueWhisperDownload() else enqueueRecommendedModelDownload()
+            }
+            .setNegativeButton("بستن", null)
+            .create()
+        dialog.show()
     }
 
     private fun copyDirectModelLink(url: String, label: String) {
@@ -947,25 +992,13 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
             else reply("مغز هوشمند JARVIS از قبل فعال است.")
             return
         }
-        AlertDialog.Builder(this)
-            .setTitle("روش دریافت مغز هوشمند JARVIS")
-            .setMessage("مدل پیشنهادی Qwen3-4B-Instruct حدود ۲.۵ گیگابایت است. می‌توانی Chrome، ADM یا دانلود مستقیم JARVIS را انتخاب کنی. برای واردسازی خودکار از دانلودر بیرونی، فقط یک‌بار پوشه Downloads را مجاز کن.")
-            .setItems(arrayOf(
-                "دانلود با برنامه دلخواه (Chrome / ADM)",
-                "دانلود مستقیم داخل JARVIS",
-                "کپی لینک مستقیم دانلود",
-                "انتخاب فایل مدل دانلودشده",
-                "بعداً"
-            )) { _, which ->
-                when (which) {
-                    0 -> { prefs.edit().putString("pending_external_model", "qwen").apply(); ensureDownloadFolderPermissionThenChooseApp() }
-                    1 -> enqueueRecommendedModelDownload()
-                    2 -> copyDirectModelLink(MODEL_URL, MODEL_FILENAME)
-                    3 -> selectLocalModel()
-                    else -> { }
-                }
-            }
-            .show()
+        showModelDownloadDialog(
+            title = "دریافت مغز هوشمند JARVIS",
+            description = "مدل Qwen3-4B-Instruct حدود ۲٫۵ گیگابایت است. با انتخاب برنامه دانلود، Chrome یا ADM را انتخاب کن. پس از دانلود، JARVIS فایل را از پوشه Downloads پیدا و خودش وارد و فعال می‌کند. فقط بار اول باید دسترسی پوشه دانلودها را بدهی.",
+            url = MODEL_URL,
+            fileName = MODEL_FILENAME,
+            isWhisper = false
+        )
     }
 
     private fun shareRecommendedModelLink() {
