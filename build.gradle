@@ -36,6 +36,8 @@ dependencies {
 }
 
 // The Kotlin source root is the repository root; order Android asset/class tasks first.
-tasks.named('compileDebugKotlin') {
-    dependsOn 'mergeDebugAssets', 'compressDebugAssets', 'mergeExtDexDebug', 'checkDebugDuplicateClasses', 'desugarDebugFileDependencies'
+tasks.configureEach {
+    if (name == 'compileDebugKotlin') {
+        dependsOn 'mergeDebugAssets', 'compressDebugAssets', 'mergeExtDexDebug', 'checkDebugDuplicateClasses', 'desugarDebugFileDependencies'
+    }
 }
