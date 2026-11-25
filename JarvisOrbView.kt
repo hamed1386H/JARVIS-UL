@@ -13,6 +13,8 @@ class JarvisOrbView(context: Context) : View(context) {
     private var pulse = 0.45f
     private var rotation = 0f
     private var mode = Mode.IDLE
+    private var audioLevel = 0f
+    fun setAudioLevel(level: Float) { audioLevel = level.coerceIn(0f, 1f); invalidate() }
     private var animator: ValueAnimator? = null
 
     fun setMode(next: Mode) { mode = next; invalidate() }
@@ -56,7 +58,7 @@ class JarvisOrbView(context: Context) : View(context) {
         paint.style = Paint.Style.STROKE
         paint.strokeWidth = 2.2f
         paint.color = Color.argb(180, Color.red(accent), Color.green(accent), Color.blue(accent))
-        canvas.drawCircle(cx, cy, r * (1.12f + pulse * 0.025f), paint)
+        canvas.drawCircle(cx, cy, r * (1.12f + pulse * 0.025f + audioLevel * 0.18f), paint)
         paint.strokeWidth = 1f
         paint.color = Color.argb(75, 100, 130, 255)
         canvas.save()
@@ -67,7 +69,7 @@ class JarvisOrbView(context: Context) : View(context) {
         paint.shader = RadialGradient(cx-r*0.28f, cy-r*0.34f, r*1.42f,
             intArrayOf(Color.rgb(205, 170, 255), Color.rgb(108, 70, 220), Color.rgb(28, 42, 112), Color.rgb(5, 9, 25)),
             floatArrayOf(0f, 0.34f, 0.76f, 1f), Shader.TileMode.CLAMP)
-        canvas.drawCircle(cx, cy, r*(0.96f + pulse*0.018f), paint)
+        canvas.drawCircle(cx, cy, r*(0.96f + pulse*0.018f + audioLevel * 0.035f), paint)
         paint.shader = null
         paint.style = Paint.Style.STROKE
         paint.strokeWidth = 1.2f
