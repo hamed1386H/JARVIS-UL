@@ -893,7 +893,7 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
 
     // SMS is deliberately handed to the system messaging app; JARVIS never sends silently.
     private fun parseSmsRequest(raw: String): Pair<String, String>? {
-        val q = normalize(raw).replace(Regex("[،,؛;]+"), " ").replace(Regex("\s+"), " ").trim()
+        val q = normalize(raw).replace(Regex("[،,؛;]+"), " ").replace(Regex("\\s+"), " ").trim()
         val recipientMatch = Regex("""به\s+(.+?)\s+(?:پیام\s*بده|پیامک\s*بده|اس\s*ام\s*اس\s*بده)""").find(q)
             ?: return null
         val recipient = recipientMatch.groupValues[1].trim().trim(',', '،', '.', '!')
@@ -933,8 +933,8 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
                 while (cursor.moveToNext()) {
                     val name = cursor.getString(nameCol).orEmpty()
                     val number = cursor.getString(numberCol).orEmpty()
-                    val normalizedName = normalize(name).replace(Regex("\s+"), "")
-                    val target = normalize(recipient).replace(Regex("\s+"), "")
+                    val normalizedName = normalize(name).replace(Regex("\\s+"), "")
+                    val target = normalize(recipient).replace(Regex("\\s+"), "")
                     val score = when {
                         normalizedName == target -> 100
                         normalizedName.startsWith(target) || target.startsWith(normalizedName) -> 80
