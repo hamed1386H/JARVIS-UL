@@ -688,12 +688,47 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
             return
         }
         AlertDialog.Builder(this)
-            .setTitle("فعال‌سازی مغز هوشمند JARVIS")
-            .setMessage("مدل مکالمه‌ای Qwen3-4B-Instruct با کیفیت بالاتر انتخاب شده است. حجم دانلود حدود ۲.۵ گیگابایت است. دانلود فقط یک‌بار انجام می‌شود؛ پس از آن پاسخ‌گویی مدل روی خود گوشی و بدون API و اینترنت انجام خواهد شد. برای دانلود اولیه اینترنت و فضای خالی کافی لازم است.")
-            .setPositiveButton("دانلود و فعال‌سازی") { _, _ -> enqueueRecommendedModelDownload() }
-            .setNeutralButton("انتخاب مدل دیگر") { _, _ -> selectLocalModel() }
-            .setNegativeButton("بعداً", null)
+            .setTitle("روش دریافت مغز هوشمند JARVIS")
+            .setMessage("مدل پیشنهادی Qwen3-4B-Instruct حدود ۲.۵ گیگابایت است. روش دریافت را خودت انتخاب کن. اگر با ADM دانلود کردی، بعد از پایان از گزینه «انتخاب فایل دانلودشده» فایل GGUF را وارد کن.")
+            .setItems(arrayOf(
+                "دانلود با دانلودر خود گوشی",
+                "ارسال لینک دانلود به ADM یا برنامه دیگر",
+                "کپی لینک مستقیم دانلود",
+                "انتخاب فایل مدل دانلودشده",
+                "بعداً"
+            )) { _, which ->
+                when (which) {
+                    0 -> enqueueRecommendedModelDownload()
+                    1 -> shareRecommendedModelLink()
+                    2 -> copyRecommendedModelLink()
+                    3 -> selectLocalModel()
+                    else -> { }
+                }
+            }
             .show()
+    }
+
+    private fun shareRecommendedModelLink() {
+        try {
+            val send = Intent(Intent.ACTION_SEND).apply {
+                type = "text/plain"
+                putExtra(Intent.EXTRA_SUBJECT, "دانلود مدل هوش مصنوعی JARVIS")
+                putExtra(Intent.EXTRA_TEXT, MODEL_URL)
+            }
+            startActivity(Intent.createChooser(send, "ارسال لینک دانلود با ADM یا برنامه دیگر"))
+        } catch (_: Exception) {
+            copyRecommendedModelLink()
+        }
+    }
+
+    private fun copyRecommendedModelLink() {
+        try {
+            val clipboard = getSystemService(Context.CLIPBOARD_SERVICE) as android.content.ClipboardManager
+            clipboard.setPrimaryClip(android.content.ClipData.newPlainText("JARVIS GGUF model", MODEL_URL))
+            reply("لینک مستقیم مدل کپی شد. آن را در ADM وارد کن؛ پس از دانلود، از گزینه انتخاب فایل مدل استفاده کن.")
+        } catch (_: Exception) {
+            reply("کپی لینک ممکن نشد.")
+        }
     }
 
     private fun isRecommendedModelDownloadActive(): Boolean {
