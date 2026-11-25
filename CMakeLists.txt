@@ -43,6 +43,8 @@ target_include_directories(jarvis_whisper PRIVATE
     ${whisper_cpp_SOURCE_DIR}/src
     ${whisper_cpp_SOURCE_DIR}/ggml/include
     ${llama_cpp_SOURCE_DIR}/ggml/include
+    ${llama_cpp_SOURCE_DIR}/ggml/src
+    ${llama_cpp_SOURCE_DIR}/ggml/src/ggml-cpu
 )
 target_compile_definitions(jarvis_whisper PRIVATE GGML_USE_CPU WHISPER_VERSION="1.7.6")
 target_compile_features(jarvis_whisper PRIVATE cxx_std_17)
