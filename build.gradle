@@ -21,7 +21,8 @@ android {
         main {
             manifest.srcFile 'AndroidManifest.xml'
             java.srcDirs = ['.']
-            java.exclude '**/.git/**', '**/.gradle/**', '**/build/**'
+            // Only compile the six Kotlin source files stored at repository root.
+            java.include '*.kt'
         }
     }
     externalNativeBuild {
