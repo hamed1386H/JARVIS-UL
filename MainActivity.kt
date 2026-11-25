@@ -35,6 +35,8 @@ import kotlin.math.roundToInt
 
 class MainActivity : Activity(), TextToSpeech.OnInitListener {
     private lateinit var status: TextView
+    private lateinit var orbView: JarvisOrbView
+    private var autoMicStarted = false
     private lateinit var log: TextView
     private lateinit var input: EditText
     private lateinit var tts: TextToSpeech
@@ -78,121 +80,39 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
     }
 
     private fun buildUi() {
-        window.statusBarColor = Color.rgb(3, 3, 9)
-        window.navigationBarColor = Color.rgb(3, 3, 9)
-        window.decorView.systemUiVisibility = (
-            View.SYSTEM_UI_FLAG_LAYOUT_STABLE or
-            View.SYSTEM_UI_FLAG_LAYOUT_FULLSCREEN or
-            View.SYSTEM_UI_FLAG_LAYOUT_HIDE_NAVIGATION
-        )
-
+        window.statusBarColor = Color.rgb(3, 5, 16)
+        window.navigationBarColor = Color.rgb(3, 5, 16)
+        window.decorView.systemUiVisibility = View.SYSTEM_UI_FLAG_LAYOUT_STABLE or View.SYSTEM_UI_FLAG_LAYOUT_FULLSCREEN
         val root = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
-            setPadding(22, 42, 22, 18)
-            setBackgroundColor(Color.rgb(3, 3, 9))
+            setPadding(dp(20), dp(38), dp(20), dp(14))
+            background = android.graphics.drawable.GradientDrawable(android.graphics.drawable.GradientDrawable.Orientation.TL_BR, intArrayOf(Color.rgb(3, 5, 17), Color.rgb(5, 8, 25), Color.rgb(2, 3, 10)))
         }
-
-        val header = LinearLayout(this).apply {
-            orientation = LinearLayout.HORIZONTAL
-            gravity = Gravity.CENTER_VERTICAL
-        }
-        val brand = TextView(this).apply {
-            text = "J A R V I S"
-            textSize = 21f
-            letterSpacing = 0.22f
-            setTextColor(Color.WHITE)
-            typeface = Typeface.DEFAULT_BOLD
-        }
+        val header = LinearLayout(this).apply { gravity = Gravity.CENTER_VERTICAL }
+        val brand = TextView(this).apply { text = "J A R V I S"; textSize = 25f; letterSpacing = 0.28f; setTextColor(Color.WHITE); typeface = Typeface.create("sans-serif-light", Typeface.NORMAL) }
         header.addView(brand, LinearLayout.LayoutParams(0, -2, 1f))
         header.addView(actionButton("⚙", "تنظیمات JARVIS") { showJarvisSettings() })
         root.addView(header)
-
-        val island = TextView(this).apply {
-            text = "●  JARVIS  •  آماده‌باش"
-            textSize = 12f
-            gravity = Gravity.CENTER
-            setTextColor(Color.rgb(190, 160, 255))
-            setPadding(22, 11, 22, 11)
-            background = android.graphics.drawable.GradientDrawable().apply {
-                setColor(Color.rgb(15, 10, 27))
-                cornerRadius = 48f
-                setStroke(1, Color.rgb(91, 48, 160))
-            }
-        }
-        val islandWrap = LinearLayout(this).apply {
-            gravity = Gravity.CENTER
-            setPadding(0, 20, 0, 8)
-            addView(island, LinearLayout.LayoutParams(-2, -2))
-        }
-        root.addView(islandWrap)
-
-        val orb = JarvisOrbView(this)
-        root.addView(orb, LinearLayout.LayoutParams(-1, 0, 1f).apply {
-            topMargin = 6
-            bottomMargin = 4
-        })
-
-        status = TextView(this).apply {
-            text = "در خدمتم"
-            textSize = 15f
-            gravity = Gravity.CENTER
-            setTextColor(Color.rgb(190, 180, 220))
-            setPadding(4, 6, 4, 12)
-        }
+        val pill = TextView(this).apply { text = "●  JARVIS  •  ONLINE"; textSize = 11f; gravity = Gravity.CENTER; setTextColor(Color.rgb(176, 199, 255)); setPadding(dp(18), dp(9), dp(18), dp(9)); background = glass(Color.rgb(12, 17, 39), Color.rgb(65, 91, 180), 40) }
+        root.addView(LinearLayout(this).apply { gravity = Gravity.CENTER; setPadding(0, dp(18), 0, dp(2)); addView(pill) })
+        orbView = JarvisOrbView(this)
+        root.addView(orbView, LinearLayout.LayoutParams(-1, dp(270)))
+        status = TextView(this).apply { text = "در خدمتم  •  میکروفون آماده"; textSize = 13f; gravity = Gravity.CENTER; setTextColor(Color.rgb(174, 190, 226)); setPadding(0, dp(2), 0, dp(10)) }
         root.addView(status)
-
-        log = TextView(this).apply {
-            text = "سلام. من JARVIS هستم.\nبرای شروع صحبت کن یا پیامت را بنویس.\nبرای گفت‌وگوی هوشمند، مدل GGUF را از تنظیمات بارگذاری کن."
-            textSize = 14f
-            setTextColor(Color.WHITE)
-            setPadding(12, 12, 12, 12)
-        }
-        val scroll = ScrollView(this).apply {
-            isFillViewport = true
-            addView(log)
-            background = android.graphics.drawable.GradientDrawable().apply {
-                setColor(Color.rgb(10, 9, 18))
-                cornerRadius = 22f
-                setStroke(1, Color.rgb(39, 28, 61))
-            }
-        }
-        root.addView(scroll, LinearLayout.LayoutParams(-1, 0, 0.85f).apply {
-            topMargin = 8
-            bottomMargin = 12
-        })
-
-        val composer = LinearLayout(this).apply {
-            orientation = LinearLayout.HORIZONTAL
-            gravity = Gravity.CENTER_VERTICAL
-            background = android.graphics.drawable.GradientDrawable().apply {
-                setColor(Color.rgb(15, 13, 23))
-                cornerRadius = 28f
-                setStroke(1, Color.rgb(75, 47, 120))
-            }
-            setPadding(12, 5, 8, 5)
-        }
-        input = EditText(this).apply {
-            hint = "با JARVIS صحبت کن…"
-            setHintTextColor(Color.rgb(135, 128, 151))
-            setTextColor(Color.WHITE)
-            textSize = 15f
-            setSingleLine(true)
-            setBackgroundColor(Color.TRANSPARENT)
-            imeOptions = android.view.inputmethod.EditorInfo.IME_ACTION_SEND
-        }
+        log = TextView(this).apply { text = "سلام، من JARVIS هستم.\nبرای شروع، صحبت کن یا پیامت را بنویس.\n\nبرای فعال‌سازی مغز هوشمند، مدل Qwen3 را از تنظیمات دریافت کن."; textSize = 15f; setLineSpacing(dp(5).toFloat(), 1f); setTextColor(Color.rgb(235, 239, 255)); setPadding(dp(16), dp(16), dp(16), dp(16)) }
+        val scroll = ScrollView(this).apply { isFillViewport = true; addView(log); background = glass(Color.argb(185, 13, 15, 30), Color.rgb(39, 48, 83), 22) }
+        root.addView(scroll, LinearLayout.LayoutParams(-1, 0, 1f).apply { topMargin = dp(8); bottomMargin = dp(12) })
+        val composer = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL; background = glass(Color.rgb(17, 19, 36), Color.rgb(74, 91, 155), 22); setPadding(dp(10), dp(6), dp(8), dp(6)) }
+        input = EditText(this).apply { hint = "با JARVIS صحبت کن…"; setHintTextColor(Color.rgb(130, 142, 174)); setTextColor(Color.WHITE); textSize = 14f; setSingleLine(true); setPadding(dp(8), dp(8), dp(8), dp(8)); setBackgroundColor(Color.TRANSPARENT); imeOptions = android.view.inputmethod.EditorInfo.IME_ACTION_SEND }
         composer.addView(input, LinearLayout.LayoutParams(0, -2, 1f))
-        composer.addView(actionButton("🎙", "فرمان صوتی") { beginListening() })
-        composer.addView(actionButton("➤", "ارسال پیام") {
-            val q = input.text.toString().trim()
-            if (q.isNotEmpty()) {
-                input.setText("")
-                handleCommand(q)
-            }
-        })
+        composer.addView(actionButton("◉", "میکروفون") { beginListening() }, LinearLayout.LayoutParams(dp(54), dp(48)).apply { marginEnd = dp(8) })
+        composer.addView(actionButton("➤", "ارسال پیام") { val q = input.text.toString().trim(); if (q.isNotEmpty()) { input.setText(""); handleCommand(q) } }, LinearLayout.LayoutParams(dp(54), dp(48)))
         root.addView(composer)
         setContentView(root)
     }
 
+    private fun dp(value: Int): Int = (value * resources.displayMetrics.density).toInt()
+    private fun glass(fill: Int, stroke: Int, radiusDp: Int): android.graphics.drawable.GradientDrawable = android.graphics.drawable.GradientDrawable().apply { setColor(fill); cornerRadius = dp(radiusDp).toFloat(); setStroke(dp(1), stroke) }
     private fun showJarvisSettings() {
         val items = arrayOf(
             "دانلود و فعال‌سازی مغز هوشمند JARVIS (Qwen3-4B)",
@@ -367,6 +287,11 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
     override fun onResume() {
         super.onResume()
         updatePermissionStatus()
+        if (!autoMicStarted) {
+            autoMicStarted = true
+            if (ContextCompat.checkSelfPermission(this, Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED) beginListening()
+            else ActivityCompat.requestPermissions(this, arrayOf(Manifest.permission.RECORD_AUDIO), requestMic)
+        }
     }
 
     override fun onPause() {
