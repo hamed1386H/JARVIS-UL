@@ -117,6 +117,15 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
             LinearLayout.LayoutParams(dp(54), dp(46)))
         root.addView(header)
 
+        val subtitle = TextView(this).apply {
+            text = "PERSONAL AI  •  LOCAL CORE  •  فارسی"
+            textSize = 10f
+            letterSpacing = 0.14f
+            setTextColor(Color.rgb(91, 220, 232))
+            setPadding(dp(2), dp(3), dp(2), dp(2))
+        }
+        root.addView(subtitle)
+
         val pill = TextView(this).apply {
             text = "●   JARVIS   •   READY"
             textSize = 11f
@@ -214,6 +223,15 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
             val q = input.text.toString().trim()
             if (q.isNotEmpty()) { input.setText(""); handleCommand(q) }
         }, LinearLayout.LayoutParams(dp(52), dp(48)))
+        val quickActions = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER
+            setPadding(0, 0, 0, dp(8))
+        }
+        quickActions.addView(actionButton("▦", "برنامه‌ها") { showApps() }, LinearLayout.LayoutParams(0, dp(42), 1f).apply { marginEnd = dp(6) })
+        quickActions.addView(actionButton("↓", "دریافت مدل") { promptRecommendedModelDownload() }, LinearLayout.LayoutParams(0, dp(42), 1f).apply { marginEnd = dp(6) })
+        quickActions.addView(actionButton("⚙", "تنظیمات") { showJarvisSettings() }, LinearLayout.LayoutParams(0, dp(42), 1f))
+        root.addView(quickActions)
         root.addView(composer)
         setContentView(root)
     }
@@ -1178,7 +1196,7 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
         status.text = "در حال بارگذاری مدل محلی روی گوشی…"
         executor.execute {
             try {
-                localAi.load(file.absolutePath, 4, 4096)
+                localAi.load(file.absolutePath, 3, 2048)
                 prefs.edit().putString("local_model_path", file.absolutePath).putBoolean("local_ai_enabled", true).apply()
                 runOnUiThread { status.text = "مغز هوشمند JARVIS فعال است؛ پردازش کاملاً محلی"; addLog("JARVIS", "مدل Qwen روی گوشی بارگذاری و آماده شد.") }
             } catch (e: Exception) {
@@ -1247,7 +1265,7 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
                 check(temporaryFile.renameTo(localModelFile)) { "ذخیره نهایی فایل مدل ناموفق بود." }
                 runOnUiThread { status.text = "فایل ذخیره شد؛ در حال بارگذاری موتور هوش مصنوعی…" }
                 check(LocalAiEngine.isNativeAvailable()) { "کتابخانه موتور llama.cpp در APK وجود ندارد. پروژه باید با NDK کامپایل شود." }
-                localAi.load(localModelFile.absolutePath, 4, 4096)
+                localAi.load(localModelFile.absolutePath, 3, 2048)
                 prefs.edit().putString("local_model_path", localModelFile.absolutePath).putBoolean("local_ai_enabled", true).apply()
                 runOnUiThread { reply("مدل محلی بارگذاری شد. اکنون می‌توانی بدون API با من گفتگو کنی.") }
             } catch (e: Exception) {
@@ -1304,7 +1322,7 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
                     promptBuilder.append("<|im_start|>").append(role).append("\n").append(content).append("<|im_end|>\n")
                 }
                 promptBuilder.append("<|im_start|>user\n").append(prompt.take(1200)).append("<|im_end|>\n<|im_start|>assistant\n/no_think\n")
-                val answer = localAi.generate(promptBuilder.toString(), 384).trim()
+                val answer = localAi.generate(promptBuilder.toString(), 256).trim()
                     .replace(Regex("<think>[\\s\\S]*?</think>"), "").trim()
                 runOnUiThread {
                     addLog("شما", prompt)
@@ -1444,7 +1462,7 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
         private const val WHISPER_MODEL_URL = "https://huggingface.co/armantee/whisper-base-persian-ggml/resolve/main/ggml-base-persian-q8_0.bin"
         private const val KEY_WHISPER_DOWNLOAD_ID = "jarvis_whisper_download_id"
         private const val MODEL_FILENAME = "Qwen3-4B-Instruct-2507-Q4_K_M.gguf"
-        private const val MODEL_URL = "https://huggingface.co/bartowski/Qwen_Qwen3-4B-Instruct-2507-GGUF/resolve/main/Qwen3-4B-Instruct-2507-Q4_K_M.gguf"
+        private const val MODEL_URL = "https://huggingface.co/bartowski/Qwen_Qwen3-4B-Instruct-2507-GGUF/resolve/main/Qwen3-4B-Instruct-2507-Q4_K_M.gguf?download=true"
         private const val KEY_MODEL_DOWNLOAD_ID = "jarvis_model_download_id"
     }
 
