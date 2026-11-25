@@ -73,7 +73,7 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
         override fun onReceive(context: Context?, intent: Intent?) {
             if (intent?.action == DownloadManager.ACTION_DOWNLOAD_COMPLETE) {
                 val id = intent.getLongExtra(DownloadManager.EXTRA_DOWNLOAD_ID, -1L)
-                handleModelDownloadComplete(id)
+                if (id == prefs.getLong(KEY_WHISPER_DOWNLOAD_ID, -2L)) handleWhisperDownloadComplete(id) else handleModelDownloadComplete(id)
             }
         }
     }
@@ -357,6 +357,108 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
             finally { try { recorder?.release() } catch (_: Exception) {}; runOnUiThread { orbView.setAudioLevel(0f) } }
         }
     }
+    private fun autoLoadWhisperModel() {
+        if (whisperModelFile.isFile && whisperModelFile.length() > 50000000L && WhisperEngine.isAvailable()) {
+            executor.execute { try { whisper.load(whisperModelFile.absolutePath) } catch (_: Exception) { } }
+        }
+    }
+
+    private fun promptWhisperModelDownload() {
+        val choices = arrayOf("دانلود با دانلودر گوشی", "ارسال لینک به ADM", "کپی لینک مستقیم", "انتخاب فایل دانلودشده", "بعداً")
+        AlertDialog.Builder(this).setTitle("مدل تشخیص صدای فارسی Whisper")
+            .setMessage("مدل فارسی Whisper Base حدود ۸۲ مگابایت است. می‌توانی آن را با ADM دریافت کنی و بعد فایل را انتخاب کنی.")
+            .setItems(choices) { _, which ->
+                when (which) {
+                    0 -> enqueueWhisperDownload()
+                    1 -> shareWhisperModelLink()
+                    2 -> copyWhisperModelLink()
+                    3 -> selectWhisperModelFile()
+                }
+            }.show()
+    }
+
+    private fun shareWhisperModelLink() {
+        val send = Intent(Intent.ACTION_SEND).apply {
+            type = "text/plain"
+            putExtra(Intent.EXTRA_SUBJECT, "مدل فارسی Whisper برای JARVIS")
+            putExtra(Intent.EXTRA_TEXT, WHISPER_MODEL_URL)
+        }
+        startActivity(Intent.createChooser(send, "ارسال لینک با ADM یا برنامه دیگر"))
+    }
+
+    private fun copyWhisperModelLink() {
+        val clipboard = getSystemService(Context.CLIPBOARD_SERVICE) as android.content.ClipboardManager
+        clipboard.setPrimaryClip(android.content.ClipData.newPlainText("Whisper Persian model", WHISPER_MODEL_URL))
+        reply("لینک مدل فارسی Whisper کپی شد؛ آن را در ADM وارد کن و پس از دانلود فایل را انتخاب کن.")
+    }
+
+    private fun enqueueWhisperDownload() {
+        try {
+            whisperModelFile.parentFile?.mkdirs()
+            val request = DownloadManager.Request(Uri.parse(WHISPER_MODEL_URL))
+                .setTitle("دانلود مدل فارسی Whisper")
+                .setDescription("مدل تشخیص گفتار فارسی JARVIS")
+                .setAllowedOverMetered(true).setAllowedOverRoaming(false)
+                .setNotificationVisibility(DownloadManager.Request.VISIBILITY_VISIBLE_NOTIFY_COMPLETED)
+                .setDestinationInExternalFilesDir(this, Environment.DIRECTORY_DOWNLOADS, WHISPER_MODEL_FILENAME)
+            val id = (getSystemService(Context.DOWNLOAD_SERVICE) as DownloadManager).enqueue(request)
+            prefs.edit().putLong(KEY_WHISPER_DOWNLOAD_ID, id).apply()
+            reply("دانلود مدل فارسی Whisper آغاز شد.")
+        } catch (e: Exception) { reply("شروع دانلود Whisper ممکن نشد: " + (e.message ?: "خطا")) }
+    }
+
+    private fun selectWhisperModelFile() {
+        val pick = Intent(Intent.ACTION_OPEN_DOCUMENT).apply {
+            addCategory(Intent.CATEGORY_OPENABLE)
+            type = "application/octet-stream"
+        }
+        startActivityForResult(pick, requestWhisperModel)
+    }
+
+    private fun importWhisperModel(uri: Uri) {
+        status.text = "در حال وارد کردن مدل Whisper…"
+        executor.execute {
+            try {
+                whisperModelFile.parentFile?.mkdirs()
+                contentResolver.openInputStream(uri)!!.use { input ->
+                    whisperModelFile.outputStream().buffered(1024 * 1024).use { output -> input.copyTo(output, 1024 * 1024) }
+                }
+                require(whisperModelFile.length() > 50000000L) { "فایل انتخاب‌شده اندازه مدل Whisper را ندارد." }
+                whisper.load(whisperModelFile.absolutePath)
+                runOnUiThread { reply("مدل فارسی Whisper بارگذاری شد؛ تشخیص صدا داخل JARVIS انجام می‌شود.") }
+            } catch (e: Exception) {
+                runOnUiThread { reply("وارد کردن مدل Whisper ناموفق بود: " + (e.message ?: "خطا")) }
+            }
+        }
+    }
+
+    private fun loadWhisperModel(file: java.io.File) {
+        status.text = "در حال بارگذاری مدل فارسی Whisper…"
+        executor.execute {
+            try {
+                whisper.load(file.absolutePath)
+                runOnUiThread { status.text = "Whisper فارسی آماده است."; if (activityVisible) captureAndTranscribe() }
+            } catch (e: Exception) {
+                runOnUiThread { reply("بارگذاری مدل Whisper ناموفق بود: " + (e.message ?: "خطا")) }
+            }
+        }
+    }
+
+    private fun handleWhisperDownloadComplete(id: Long) {
+        if (id != prefs.getLong(KEY_WHISPER_DOWNLOAD_ID, -1L)) return
+        val manager = getSystemService(Context.DOWNLOAD_SERVICE) as DownloadManager
+        manager.query(DownloadManager.Query().setFilterById(id))?.use { cursor ->
+            if (cursor.moveToFirst() && cursor.getInt(cursor.getColumnIndexOrThrow(DownloadManager.COLUMN_STATUS)) == DownloadManager.STATUS_SUCCESSFUL &&
+                whisperModelFile.isFile && whisperModelFile.length() > 50000000L) {
+                prefs.edit().remove(KEY_WHISPER_DOWNLOAD_ID).apply()
+                loadWhisperModel(whisperModelFile)
+            } else {
+                prefs.edit().remove(KEY_WHISPER_DOWNLOAD_ID).apply()
+                reply("دانلود مدل Whisper کامل یا معتبر نبود.")
+            }
+        }
+    }
+
     private fun toggleWakeMode() {
         if (isWakeServiceRunning()) {
             stopService(Intent(this, WakeWordService::class.java))
@@ -418,6 +520,11 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
         if (requestCode == requestLocalModel && resultCode == RESULT_OK) {
             val uri = data?.data
             if (uri != null) copyAndLoadLocalModel(uri) else reply("فایلی انتخاب نشد")
+            return
+        }
+        if (requestCode == requestWhisperModel && resultCode == RESULT_OK) {
+            val uri = data?.data
+            if (uri != null) importWhisperModel(uri) else reply("فایلی انتخاب نشد")
             return
         }
     }
@@ -940,6 +1047,30 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
 
     override fun onInit(code: Int) {
         if (code == TextToSpeech.SUCCESS) {
+            tts.setOnUtteranceProgressListener(object : UtteranceProgressListener() {
+                override fun onStart(utteranceId: String?) {
+                    runOnUiThread { if (::orbView.isInitialized) { orbView.setMode(JarvisOrbView.Mode.SPEAKING); orbView.setAudioLevel(0.15f) } }
+                }
+                override fun onDone(utteranceId: String?) {
+                    runOnUiThread {
+                        if (::orbView.isInitialized) { orbView.setAudioLevel(0f); orbView.setMode(JarvisOrbView.Mode.IDLE) }
+                        if (activityVisible && whisper.isLoaded()) captureAndTranscribe()
+                    }
+                }
+                override fun onError(utteranceId: String?) {
+                    runOnUiThread { if (::orbView.isInitialized) { orbView.setAudioLevel(0f); orbView.setMode(JarvisOrbView.Mode.IDLE) } }
+                }
+                override fun onAudioAvailable(utteranceId: String?, audio: ByteArray?) {
+                    if (audio == null || audio.size < 2) return
+                    var sum = 0.0; var count = 0; var i = 0
+                    while (i + 1 < audio.size) {
+                        val sample = ((audio[i + 1].toInt() shl 8) or (audio[i].toInt() and 255)).toShort().toInt()
+                        sum += sample.toDouble() * sample.toDouble(); count++; i += 2
+                    }
+                    val level = if (count == 0) 0f else (kotlin.math.sqrt(sum / count) / 12000.0).toFloat().coerceIn(0f, 1f)
+                    runOnUiThread { if (::orbView.isInitialized) orbView.setAudioLevel(level) }
+                }
+            })
             val result = tts.setLanguage(Locale("fa", "IR"))
             ttsReady = result >= TextToSpeech.LANG_AVAILABLE
             val savedVoice = prefs.getString("tts_voice", "")
@@ -967,6 +1098,9 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
     }
 
     companion object {
+        private const val WHISPER_MODEL_FILENAME = "ggml-base-persian-q8_0.bin"
+        private const val WHISPER_MODEL_URL = "https://huggingface.co/armantee/whisper-base-persian-ggml/resolve/main/ggml-base-persian-q8_0.bin"
+        private const val KEY_WHISPER_DOWNLOAD_ID = "jarvis_whisper_download_id"
         private const val MODEL_FILENAME = "Qwen3-4B-Instruct-2507-Q4_K_M.gguf"
         private const val MODEL_URL = "https://huggingface.co/bartowski/Qwen_Qwen3-4B-Instruct-2507-GGUF/resolve/main/Qwen3-4B-Instruct-2507-Q4_K_M.gguf"
         private const val KEY_MODEL_DOWNLOAD_ID = "jarvis_model_download_id"
