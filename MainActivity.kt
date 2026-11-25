@@ -118,7 +118,7 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
         root.addView(header)
 
         val subtitle = TextView(this).apply {
-            text = "PERSONAL AI  •  LOCAL CORE  •  فارسی"
+            text = "VOICE INTERFACE  •  LOCAL INTELLIGENCE  •  فارسی"
             textSize = 10f
             letterSpacing = 0.14f
             setTextColor(Color.rgb(91, 220, 232))
@@ -127,7 +127,7 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
         root.addView(subtitle)
 
         val pill = TextView(this).apply {
-            text = "●   JARVIS   •   READY"
+            text = "●   JARVIS   •   AI CORE"
             textSize = 11f
             letterSpacing = 0.08f
             gravity = Gravity.CENTER
@@ -137,12 +137,12 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
         }
         root.addView(LinearLayout(this).apply {
             gravity = Gravity.CENTER
-            setPadding(0, dp(18), 0, dp(2))
+            setPadding(0, dp(10), 0, dp(0))
             addView(pill)
         })
 
         orbView = JarvisOrbView(this)
-        root.addView(orbView, LinearLayout.LayoutParams(-1, dp(250)))
+        root.addView(orbView, LinearLayout.LayoutParams(-1, dp(208)))
 
         status = TextView(this).apply {
             text = "در انتظار فرمان تو"
@@ -181,7 +181,7 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
         log = TextView(this).apply {
             text = "سلام، من JARVIS هستم.\nبرای شروع، صحبت کن یا پیامت را بنویس.\n\nبرای فعال‌سازی مغز هوشمند، مدل Qwen3 را از تنظیمات دریافت کن."
             textSize = 15f
-            setLineSpacing(dp(6).toFloat(), 1.04f)
+            setLineSpacing(dp(5).toFloat(), 1.02f)
             setTextColor(Color.rgb(231, 236, 255))
             setPadding(dp(4), dp(6), dp(4), dp(8))
             gravity = Gravity.TOP or Gravity.START
