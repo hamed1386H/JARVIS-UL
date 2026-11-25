@@ -100,17 +100,31 @@ Java_com_chtai_assistant_LocalAiEngine_nativeGenerate(JNIEnv * env, jobject,
     if (tokens.size() + static_cast<size_t>(maxTokens) >= contextLimit) {
         return env->NewStringUTF("گفتگو برای ظرفیت فعلی مدل طولانی است؛ تاریخچه گفتگو را کوتاه یا پاک کن.");
     }
-    llama_batch promptBatch = llama_batch_init(static_cast<int32_t>(tokens.size()), 0, 1);
-    for (size_t i = 0; i < tokens.size(); ++i) {
-        promptBatch.token[i] = tokens[i];
-        promptBatch.pos[i] = static_cast<llama_pos>(i);
-        promptBatch.n_seq_id[i] = 1;
-        promptBatch.seq_id[i][0] = 0;
-        promptBatch.logits[i] = (i + 1 == tokens.size());
+    // llama_decode cannot accept more tokens than contextParams.n_batch (128).
+    // Split long Persian prompts/history into bounded batches; request logits only
+    // for the final prompt token so generation starts from the correct position.
+    constexpr int32_t batchCapacity = 128;
+    size_t offset = 0;
+    while (offset < tokens.size()) {
+        const size_t count = std::min<size_t>(batchCapacity, tokens.size() - offset);
+        llama_batch promptBatch = llama_batch_init(static_cast<int32_t>(count), 0, 1);
+        for (size_t i = 0; i < count; ++i) {
+            const size_t tokenIndex = offset + i;
+            promptBatch.token[i] = tokens[tokenIndex];
+            promptBatch.pos[i] = static_cast<llama_pos>(tokenIndex);
+            promptBatch.n_seq_id[i] = 1;
+            promptBatch.seq_id[i][0] = 0;
+            promptBatch.logits[i] = (tokenIndex + 1 == tokens.size());
+        }
+        const int decodeResult = llama_decode(state->context, promptBatch);
+        llama_batch_free(promptBatch);
+        if (decodeResult != 0) {
+            LOGE("Prompt decode failed at token %zu/%zu (batch size %zu)",
+                 offset, tokens.size(), count);
+            return env->NewStringUTF("پردازش ورودی مدل ناموفق شد؛ حافظه یا سازگاری مدل را بررسی کن.");
+        }
+        offset += count;
     }
-    const int decodeResult = llama_decode(state->context, promptBatch);
-    llama_batch_free(promptBatch);
-    if (decodeResult != 0) return env->NewStringUTF("پردازش ورودی مدل با خطا مواجه شد.");
 
     std::string output;
     output.reserve(2048);
