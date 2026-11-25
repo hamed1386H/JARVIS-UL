@@ -23,6 +23,10 @@ jobs:
           mkdir -p jarvis-source
           unzip -q JARVIS_v1.3_LocalAI_GitHub.zip -d jarvis-source
 
+      - name: Apply latest in-app voice input implementation
+        run: |
+          install -D MainActivity.kt jarvis-source/app/src/main/java/com/chtai/assistant/MainActivity.kt
+
       - name: Set up Java 17
         uses: actions/setup-java@v4
         with:
