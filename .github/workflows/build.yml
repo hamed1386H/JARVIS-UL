@@ -4,7 +4,7 @@ on:
   workflow_dispatch:
   push:
     branches: [ main, master ]
-    paths: [ 'JARVIS_v1.3_LocalAI_GitHub.zip', '.github/workflows/build.yml' ]
+    paths: [ 'JARVIS_v1.3_LocalAI_GitHub.zip', 'MainActivity.kt', '.github/workflows/build.yml' ]
 
 permissions:
   contents: read
