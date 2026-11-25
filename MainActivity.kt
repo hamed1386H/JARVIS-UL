@@ -46,6 +46,8 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
     private var ttsReady = false
     private var wakeMode = false
     private val executor = Executors.newSingleThreadExecutor()
+    // Keep continuous microphone capture/transcription off the AI/model worker queue.
+    private val voiceExecutor = Executors.newSingleThreadExecutor()
     private val prefs by lazy { getSharedPreferences("cht_ai", Context.MODE_PRIVATE) }
     private val requestMic = 102
     private val requestCorePermissions = 103
@@ -477,7 +479,7 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
     private fun captureAndTranscribe() {
         if (!activityVisible || !whisper.isLoaded()) return
         status.text = "JARVIS گوش می‌دهد…"; orbView.setMode(JarvisOrbView.Mode.LISTENING)
-        executor.execute {
+        voiceExecutor.execute {
             var recorder: AudioRecord? = null
             try {
                 val rate = 16000
@@ -510,7 +512,7 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
     }
     private fun autoLoadWhisperModel() {
         if (whisperModelFile.isFile && whisperModelFile.length() > 50000000L && WhisperEngine.isAvailable()) {
-            executor.execute { try { whisper.load(whisperModelFile.absolutePath) } catch (_: Exception) { } }
+            voiceExecutor.execute { try { whisper.load(whisperModelFile.absolutePath) } catch (_: Exception) { } }
         }
     }
 
@@ -735,7 +737,7 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
 
     private fun importWhisperModel(uri: Uri) {
         status.text = "در حال وارد کردن مدل Whisper…"
-        executor.execute {
+        voiceExecutor.execute {
             try {
                 whisperModelFile.parentFile?.mkdirs()
                 contentResolver.openInputStream(uri)!!.use { input ->
@@ -751,7 +753,7 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
 
     private fun loadWhisperModel(file: java.io.File) {
         status.text = "در حال بارگذاری مدل فارسی Whisper…"
-        executor.execute {
+        voiceExecutor.execute {
             try {
                 whisper.load(file.absolutePath)
                 runOnUiThread { status.text = "Whisper فارسی آماده است."; if (activityVisible) captureAndTranscribe() }
@@ -1635,6 +1637,7 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
         try {
             executor.execute { try { localAi.unload() } catch (_: Exception) { } }
             executor.shutdown()
+            voiceExecutor.shutdownNow()
         } catch (_: Exception) {
             executor.shutdownNow()
         }
