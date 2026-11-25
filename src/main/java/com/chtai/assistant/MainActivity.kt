@@ -69,6 +69,7 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
     private val PREF_DOWNLOAD_TREE = "jarvis_download_tree_uri"
     private val whisperModelFile by lazy { java.io.File(getExternalFilesDir(Environment.DIRECTORY_DOWNLOADS) ?: filesDir, WHISPER_MODEL_FILENAME) }
     @Volatile private var activityVisible = false
+    @Volatile private var voiceCaptureActive = false
     private val requestLocalModel = 105
     private val localModelFile by lazy {
         val base = getExternalFilesDir(Environment.DIRECTORY_DOWNLOADS) ?: java.io.File(filesDir, "models")
@@ -471,6 +472,8 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
             autoMicStarted = true
             if (ContextCompat.checkSelfPermission(this, Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED) beginListening()
             else ActivityCompat.requestPermissions(this, arrayOf(Manifest.permission.RECORD_AUDIO), requestMic)
+        } else if (whisper.isLoaded() && !voiceCaptureActive) {
+            captureAndTranscribe()
         }
     }
 
@@ -492,7 +495,8 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
     }
 
     private fun captureAndTranscribe() {
-        if (!activityVisible || !whisper.isLoaded()) return
+        if (!activityVisible || !whisper.isLoaded() || voiceCaptureActive) return
+        voiceCaptureActive = true
         status.text = "JARVIS گوش می‌دهد…"; orbView.setMode(JarvisOrbView.Mode.LISTENING)
         voiceExecutor.execute {
             var recorder: AudioRecord? = null
@@ -518,11 +522,35 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
                 recorder.stop()
                 val audio = FloatArray(samples.size) { samples[it] }
                 runOnUiThread { orbView.setAudioLevel(0f); orbView.setMode(JarvisOrbView.Mode.THINKING); status.text = "در حال تشخیص فارسی با Whisper…" }
-                if (audio.size < rate / 2) { runOnUiThread { status.text = "صدایی دریافت نشد؛ دوباره صحبت کن"; orbView.setMode(JarvisOrbView.Mode.IDLE) }; return@execute }
+                if (audio.size < rate / 2) {
+                    runOnUiThread {
+                        status.text = "صدایی دریافت نشد؛ دوباره صحبت کن"
+                        orbView.setMode(JarvisOrbView.Mode.IDLE)
+                        window.decorView.postDelayed({ if (activityVisible && whisper.isLoaded()) captureAndTranscribe() }, 600)
+                    }
+                    return@execute
+                }
                 val words = whisper.transcribe(audio)
-                runOnUiThread { if (words.isNotBlank()) { addLog("شما", words); handleCommand(words) } else { status.text = "متوجه صحبتت نشدم؛ دوباره بگو"; orbView.setMode(JarvisOrbView.Mode.IDLE) } }
-            } catch (e: Exception) { runOnUiThread { reply("تشخیص صدای Whisper ناموفق بود: " + (e.message ?: "خطای ناشناخته")) } }
-            finally { try { recorder?.release() } catch (_: Exception) {}; runOnUiThread { orbView.setAudioLevel(0f) } }
+                runOnUiThread {
+                    if (words.isNotBlank()) {
+                        addLog("شما", words)
+                        handleCommand(words)
+                    } else {
+                        status.text = "متوجه صحبتت نشدم؛ دوباره تلاش می‌کنم"
+                        orbView.setMode(JarvisOrbView.Mode.IDLE)
+                        window.decorView.postDelayed({ if (activityVisible && whisper.isLoaded()) captureAndTranscribe() }, 600)
+                    }
+                }
+            } catch (e: Exception) {
+                runOnUiThread {
+                    reply("تشخیص صدای Whisper ناموفق بود: " + (e.message ?: "خطای ناشناخته"))
+                    window.decorView.postDelayed({ if (activityVisible && whisper.isLoaded()) captureAndTranscribe() }, 1200)
+                }
+            } finally {
+                try { recorder?.release() } catch (_: Exception) {}
+                voiceCaptureActive = false
+                runOnUiThread { orbView.setAudioLevel(0f) }
+            }
         }
     }
     private fun autoLoadWhisperModel() {
@@ -1609,7 +1637,10 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
     override fun onRequestPermissionsResult(requestCode: Int, permissions: Array<out String>, grantResults: IntArray) {
         super.onRequestPermissionsResult(requestCode, permissions, grantResults)
         if (requestCode == requestMic && grantResults.firstOrNull() == PackageManager.PERMISSION_GRANTED) beginListening()
-        else if (requestCode == requestMic) reply("برای فرمان صوتی باید مجوز میکروفون را بدهی")
+        else if (requestCode == requestMic) {
+            autoMicStarted = false
+            reply("برای فرمان صوتی باید مجوز میکروفون را بدهی")
+        }
         if (requestCode == 104) {
             if (android.os.Build.VERSION.SDK_INT < 33 || ContextCompat.checkSelfPermission(this, Manifest.permission.POST_NOTIFICATIONS) == PackageManager.PERMISSION_GRANTED) startWakeServiceNow()
             else reply("مجوز اعلان داده نشد؛ برای نمایش اعلان دائمی باید آن را از تنظیمات مجاز کنی")
@@ -1653,10 +1684,20 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
                     runOnUiThread { if (::orbView.isInitialized) orbView.setAudioLevel(level) }
                 }
             })
-            val result = tts.setLanguage(Locale("fa", "IR"))
-            ttsReady = result >= TextToSpeech.LANG_AVAILABLE
             val savedVoice = prefs.getString("tts_voice", "")
-            if (!savedVoice.isNullOrBlank()) tts.voices?.firstOrNull { it.name == savedVoice }?.let { tts.setVoice(it) }
+            val availableVoices = tts.voices.orEmpty()
+            val saved = availableVoices.firstOrNull { it.name == savedVoice }
+            val persianVoice = availableVoices.firstOrNull { it.locale.language == "fa" }
+            if (saved != null) {
+                ttsReady = tts.setVoice(saved) == TextToSpeech.SUCCESS
+            }
+            if (!ttsReady && persianVoice != null) {
+                ttsReady = tts.setVoice(persianVoice) == TextToSpeech.SUCCESS
+            }
+            if (!ttsReady) {
+                val result = tts.setLanguage(Locale("fa", "IR"))
+                ttsReady = result >= TextToSpeech.LANG_AVAILABLE
+            }
             if (!ttsReady) {
                 val fallback = tts.setLanguage(Locale.getDefault())
                 ttsReady = fallback >= TextToSpeech.LANG_AVAILABLE
