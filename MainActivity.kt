@@ -44,6 +44,7 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
     private lateinit var input: EditText
     private lateinit var tts: TextToSpeech
     private var ttsReady = false
+    @Volatile private var pendingSpeech = ""
     private var wakeMode = false
     private val executor = Executors.newSingleThreadExecutor()
     // Keep continuous microphone capture/transcription off the AI/model worker queue.
@@ -1574,7 +1575,20 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
     }
 
     private fun reply(message: String) { status.text = message; addLog("JARVIS", message); speak(message) }
-    private fun speak(message: String) { if (ttsReady) { orbView.setMode(JarvisOrbView.Mode.SPEAKING); tts.speak(message, TextToSpeech.QUEUE_FLUSH, null, "jarvis_reply") } }
+    private fun speak(message: String) {
+        if (message.isBlank()) return
+        if (!ttsReady || !::tts.isInitialized) {
+            pendingSpeech = message
+            return
+        }
+        if (::orbView.isInitialized) orbView.setMode(JarvisOrbView.Mode.SPEAKING)
+        val result = tts.speak(message, TextToSpeech.QUEUE_FLUSH, null, "jarvis_reply")
+        if (result == TextToSpeech.ERROR) {
+            pendingSpeech = message
+            ttsReady = false
+            status.text = "پخش صدا ناموفق بود؛ موتور گفتار گوشی را بررسی کن."
+        }
+    }
 
     override fun onRequestPermissionsResult(requestCode: Int, permissions: Array<out String>, grantResults: IntArray) {
         super.onRequestPermissionsResult(requestCode, permissions, grantResults)
@@ -1627,7 +1641,21 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
             ttsReady = result >= TextToSpeech.LANG_AVAILABLE
             val savedVoice = prefs.getString("tts_voice", "")
             if (!savedVoice.isNullOrBlank()) tts.voices?.firstOrNull { it.name == savedVoice }?.let { tts.setVoice(it) }
-            if (!ttsReady) { tts.setLanguage(Locale.getDefault()); ttsReady = true; status.text = "صدای فارسی نصب نیست؛ زبان پیش‌فرض استفاده می‌شود" }
+            if (!ttsReady) {
+                val fallback = tts.setLanguage(Locale.getDefault())
+                ttsReady = fallback >= TextToSpeech.LANG_AVAILABLE
+                if (ttsReady) status.text = "صدای فارسی نصب نیست؛ از صدای پیش‌فرض گوشی استفاده می‌شود"
+            }
+            if (ttsReady) {
+                val queued = pendingSpeech
+                pendingSpeech = ""
+                if (queued.isNotBlank()) speak(queued)
+            } else {
+                status.text = "موتور تبدیل متن به گفتار آماده نیست؛ سرویس گفتار گوشی را نصب یا فعال کن."
+            }
+        } else {
+            ttsReady = false
+            status.text = "راه‌اندازی موتور گفتار ناموفق بود؛ تنظیمات تبدیل متن به گفتار گوشی را بررسی کن."
         }
     }
 
