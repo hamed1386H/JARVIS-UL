@@ -34,3 +34,8 @@ dependencies {
     implementation 'androidx.core:core-ktx:1.15.0'
     implementation 'androidx.documentfile:documentfile:1.0.1'
 }
+
+// The Kotlin source root is the repository root; order Android asset/class tasks first.
+tasks.named('compileDebugKotlin') {
+    dependsOn 'mergeDebugAssets', 'compressDebugAssets', 'mergeExtDexDebug', 'checkDebugDuplicateClasses', 'desugarDebugFileDependencies'
+}
