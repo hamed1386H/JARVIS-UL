@@ -1305,7 +1305,7 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
         status.text = "در حال بارگذاری مدل محلی روی گوشی…"
         executor.execute {
             try {
-                localAi.load(file.absolutePath, 3, 2048)
+                localAi.load(file.absolutePath, 2, 1536)
                 prefs.edit().putString("local_model_path", file.absolutePath).putBoolean("local_ai_enabled", true).apply()
                 runOnUiThread { status.text = "مغز هوشمند JARVIS فعال است؛ پردازش کاملاً محلی"; addLog("JARVIS", "مدل Qwen روی گوشی بارگذاری و آماده شد.") }
             } catch (e: Exception) {
@@ -1323,12 +1323,14 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
             status.text = "دانلود مغز هوشمند JARVIS در پس‌زمینه ادامه دارد."
             return
         }
+        // Always prefer the phone-sized 1.7B model. Never auto-load an older
+        // 4B/other saved model: it can exhaust Android's app memory during inference.
         val savedPath = prefs.getString("local_model_path", "") ?: ""
         val savedFile = if (savedPath.isNotBlank()) java.io.File(savedPath) else null
-        val isOldWeakModel = savedFile?.name?.contains("0.6b", ignoreCase = true) == true
         val file = when {
-            isValidGguf(localModelFile, 2_000_000_000L) -> localModelFile
-            savedFile != null && savedFile.isFile && !isOldWeakModel -> savedFile
+            isValidGguf(localModelFile, 1_000_000_000L) -> localModelFile
+            savedFile != null && savedFile.isFile &&
+                savedFile.name == MODEL_FILENAME && isValidGguf(savedFile, 1_000_000_000L) -> savedFile
             else -> localModelFile
         }
         if (isValidGguf(file)) {
@@ -1342,7 +1344,7 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
     private fun selectLocalModel() {
         AlertDialog.Builder(this)
             .setTitle("انتخاب مدل هوش مصنوعی محلی")
-            .setMessage("یک فایل GGUF سازگار انتخاب کن. مدل اصلی پیشنهادی JARVIS، Qwen3-4B-Instruct-2507 با کوانت Q4_K_M است. مدل‌های دیگر هم در صورت سازگاری با llama.cpp قابل آزمایش‌اند.")
+            .setMessage("یک فایل GGUF سازگار انتخاب کن. مدل پیشنهادی برای گوشی، Qwen3-1.7B با کوانت Q4_K_M است. مدل‌های دیگر هم در صورت سازگاری با llama.cpp قابل آزمایش‌اند.")
             .setPositiveButton("انتخاب فایل مدل") { _, _ ->
                 val intent = Intent(Intent.ACTION_OPEN_DOCUMENT).apply {
                     addCategory(Intent.CATEGORY_OPENABLE)
@@ -1374,7 +1376,7 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
                 check(temporaryFile.renameTo(localModelFile)) { "ذخیره نهایی فایل مدل ناموفق بود." }
                 runOnUiThread { status.text = "فایل ذخیره شد؛ در حال بارگذاری موتور هوش مصنوعی…" }
                 check(LocalAiEngine.isNativeAvailable()) { "کتابخانه موتور llama.cpp در APK وجود ندارد. پروژه باید با NDK کامپایل شود." }
-                localAi.load(localModelFile.absolutePath, 3, 2048)
+                localAi.load(localModelFile.absolutePath, 2, 1536)
                 prefs.edit().putString("local_model_path", localModelFile.absolutePath).putBoolean("local_ai_enabled", true).apply()
                 runOnUiThread { reply("مدل محلی بارگذاری شد. اکنون می‌توانی بدون API با من گفتگو کنی.") }
             } catch (e: Exception) {
@@ -1472,7 +1474,7 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
                     }
                 }
                 try {
-                    val answer = localAi.generate(agentCore.buildLocalPrompt(prompt, conversation), 256).trim()
+                    val answer = localAi.generate(agentCore.buildLocalPrompt(prompt, conversation), 128).trim()
                     runOnUiThread {
                         addLog("شما", prompt); addConversationMessage("user", prompt)
                         addLog("JARVIS • LOCAL", answer); addConversationMessage("assistant", answer)
@@ -1508,7 +1510,7 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
                     promptBuilder.append("<|im_start|>").append(role).append("\n").append(content).append("<|im_end|>\n")
                 }
                 promptBuilder.append("<|im_start|>user\n").append(prompt.take(1200)).append("<|im_end|>\n<|im_start|>assistant\n/no_think\n")
-                val answer = localAi.generate(promptBuilder.toString(), 256).trim()
+                val answer = localAi.generate(promptBuilder.toString(), 128).trim()
                     .replace(Regex("<think>[\\s\\S]*?</think>"), "").trim()
                 runOnUiThread {
                     addLog("شما", prompt)
@@ -1680,8 +1682,8 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
         private const val WHISPER_MODEL_FILENAME = "ggml-base-persian-q8_0.bin"
         private const val WHISPER_MODEL_URL = "https://huggingface.co/armantee/whisper-base-persian-ggml/resolve/main/ggml-base-persian-q8_0.bin"
         private const val KEY_WHISPER_DOWNLOAD_ID = "jarvis_whisper_download_id"
-        private const val MODEL_FILENAME = "Qwen3-4B-Instruct-2507-Q4_K_M.gguf"
-        private const val MODEL_URL = "https://huggingface.co/bartowski/Qwen_Qwen3-4B-Instruct-2507-GGUF/resolve/main/Qwen3-4B-Instruct-2507-Q4_K_M.gguf"
+        private const val MODEL_FILENAME = "Qwen3-1.7B-Q4_K_M.gguf"
+        private const val MODEL_URL = "https://huggingface.co/bartowski/Qwen_Qwen3-1.7B-GGUF/resolve/main/Qwen_Qwen3-1.7B-Q4_K_M.gguf"
         private const val KEY_MODEL_DOWNLOAD_ID = "jarvis_model_download_id"
     }
 
