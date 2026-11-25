@@ -314,15 +314,15 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
             speechRecognizer = SpeechRecognizer.createSpeechRecognizer(this)
             speechRecognizer?.setRecognitionListener(object : RecognitionListener {
                 override fun onReadyForSpeech(params: Bundle?) {
-                    status.text = "JARVIS گوش می‌دهد…"
+                    status.text = "JARVIS گوش می‌دهد…"; orbView.setMode(JarvisOrbView.Mode.LISTENING)
                 }
                 override fun onBeginningOfSpeech() {
-                    status.text = "صدایت را دریافت کردم…"
+                    status.text = "صدایت را دریافت کردم…"; orbView.setMode(JarvisOrbView.Mode.LISTENING)
                 }
                 override fun onRmsChanged(rmsdB: Float) {}
                 override fun onBufferReceived(buffer: ByteArray?) {}
                 override fun onEndOfSpeech() {
-                    status.text = "در حال تشخیص گفتار…"
+                    status.text = "در حال تشخیص گفتار…"; orbView.setMode(JarvisOrbView.Mode.THINKING)
                 }
                 override fun onError(error: Int) {
                     status.text = when (error) {
@@ -844,7 +844,7 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
             reply("مغز هوشمند هنوز آماده نیست. از تنظیمات JARVIS دانلود و فعال‌سازی مدل اصلی را انتخاب کن.")
             return
         }
-        status.text = "در حال فکر کردن روی گوشی…"
+        status.text = "در حال فکر کردن روی گوشی…"; orbView.setMode(JarvisOrbView.Mode.THINKING)
         executor.execute {
             try {
                 val promptBuilder = StringBuilder()
@@ -927,7 +927,7 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
     }
 
     private fun reply(message: String) { status.text = message; addLog("JARVIS", message); speak(message) }
-    private fun speak(message: String) { if (ttsReady) tts.speak(message, TextToSpeech.QUEUE_FLUSH, null, "jarvis_reply") }
+    private fun speak(message: String) { if (ttsReady) { orbView.setMode(JarvisOrbView.Mode.SPEAKING); tts.speak(message, TextToSpeech.QUEUE_FLUSH, null, "jarvis_reply") } }
 
     override fun onRequestPermissionsResult(requestCode: Int, permissions: Array<out String>, grantResults: IntArray) {
         super.onRequestPermissionsResult(requestCode, permissions, grantResults)
