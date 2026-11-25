@@ -42,8 +42,8 @@ Java_com_chtai_assistant_LocalAiEngine_nativeLoad(JNIEnv * env, jobject,
 
     llama_context_params contextParams = llama_context_default_params();
     contextParams.n_ctx = static_cast<uint32_t>(contextSize);
-    contextParams.n_batch = 512;
-    contextParams.n_ubatch = 128;
+    contextParams.n_batch = 128;
+    contextParams.n_ubatch = 64;
     contextParams.n_threads = threads;
     contextParams.n_threads_batch = threads;
     state->context = llama_init_from_model(state->model, contextParams);
