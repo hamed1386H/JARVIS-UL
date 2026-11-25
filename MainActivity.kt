@@ -1411,7 +1411,7 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
             setPadding(dp(20), dp(8), dp(20), dp(4))
         }
         val endpoint = EditText(this).apply {
-            hint = "آدرس کامل API سازگار با OpenAI؛ مثل https://.../v1/chat/completions"
+            hint = "آدرس سرویس یا endpoint کامل؛ مثل https://example.com یا https://example.com/v1/chat/completions"
             setText(agentCore.endpoint())
             textSize = 13f
             setSingleLine(false)
@@ -1460,11 +1460,15 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
                     }
                     return@execute
                 } catch (e: Exception) {
-                    runOnUiThread { status.text = "اتصال آنلاین ناموفق؛ تلاش با موتور محلی…" }
-                }
-                if (!localAi.isLoaded()) {
-                    runOnUiThread { reply("موتور آنلاین در دسترس نیست و مدل محلی هم بارگذاری نشده؛ تنظیمات اتصال یا دانلود Qwen را بررسی کن.") }
-                    return@execute
+                    val onlineError = e.message?.take(220) ?: "خطای نامشخص"
+                    runOnUiThread { status.text = "اتصال آنلاین ناموفق؛ بررسی موتور پشتیبان…" }
+                    if (!localAi.isLoaded()) {
+                        runOnUiThread {
+                            orbView.setMode(JarvisOrbView.Mode.IDLE)
+                            reply("اتصال API برقرار نشد: $onlineError\\nبرنامه بسته نمی‌شود. آدرس، نام مدل و کلید API را بررسی کن.")
+                        }
+                        return@execute
+                    }
                 }
                 try {
                     val answer = localAi.generate(agentCore.buildLocalPrompt(prompt, conversation), 256).trim()
