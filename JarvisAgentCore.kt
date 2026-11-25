@@ -134,18 +134,18 @@ class JarvisAgentCore(context: Context) {
 
     fun buildLocalPrompt(userText: String, history: JSONArray): String {
         val prompt = StringBuilder()
-        prompt.append("<|im_start|>system\\n/no_think\\n")
-            .append("تو JARVIS هستی؛ دستیار فارسی‌زبان، دقیق و مسئولیت‌پذیر و کمک‌برنامه‌نویس. فارسی روان پاسخ بده. در برنامه‌نویسی کد کامل و قابل استفاده، توضیح و مراحل عیب‌یابی بده. اگر مطمئن نیستی صادقانه بگو. فقط فرمان‌های واقعی و مجاز برنامه را پیشنهاد بده و هرگز ادعا نکن عملی انجام شده است.\\n<|im_end|>\\n")
+        prompt.append("<|im_start|>system\n/no_think\n")
+            .append("تو JARVIS هستی؛ دستیار فارسی‌زبان، دقیق و مسئولیت‌پذیر و کمک‌برنامه‌نویس. فارسی روان پاسخ بده. در برنامه‌نویسی کد کامل و قابل استفاده، توضیح و مراحل عیب‌یابی بده. اگر مطمئن نیستی صادقانه بگو. فقط فرمان‌های واقعی و مجاز برنامه را پیشنهاد بده و هرگز ادعا نکن عملی انجام شده است.\n<|im_end|>\n")
         val first = (history.length() - 8).coerceAtLeast(0)
         for (i in first until history.length()) {
             val item = history.optJSONObject(i) ?: continue
             val role = item.optString("role", "user")
             val content = item.optString("content", "").takeLast(900)
-            prompt.append("<|im_start|>").append(role).append("\\n")
-                .append(content).append("<|im_end|>\\n")
+            prompt.append("<|im_start|>").append(role).append("\n")
+                .append(content).append("<|im_end|>\n")
         }
-        prompt.append("<|im_start|>user\\n").append(userText.take(4000))
-            .append("<|im_end|>\\n<|im_start|>assistant\\n/no_think\\n")
+        prompt.append("<|im_start|>user\n").append(userText.take(4000))
+            .append("<|im_end|>\n<|im_start|>assistant\n/no_think\n")
         return prompt.toString()
     }
 }
