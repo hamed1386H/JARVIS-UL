@@ -4,7 +4,7 @@ on:
   workflow_dispatch:
   push:
     branches: [ main, master ]
-    paths: [ 'JARVIS_v1.3_LocalAI_GitHub.zip', 'MainActivity.kt', '.github/workflows/build.yml' ]
+    paths: [ 'JARVIS_v1.3_LocalAI_GitHub.zip', 'MainActivity.kt', 'JarvisOrbView.kt', 'launcher-res/**', '.github/workflows/build.yml' ]
 
 permissions:
   contents: read
@@ -26,6 +26,9 @@ jobs:
       - name: Apply latest in-app voice input implementation
         run: |
           install -D MainActivity.kt jarvis-source/app/src/main/java/com/chtai/assistant/MainActivity.kt
+          install -D JarvisOrbView.kt jarvis-source/app/src/main/java/com/chtai/assistant/JarvisOrbView.kt
+          cp -R launcher-res/. jarvis-source/app/src/main/res/
+          sed -i 's/<application/<application android:icon="@mipmap\/ic_launcher" android:roundIcon="@mipmap\/ic_launcher_round"/' jarvis-source/app/src/main/AndroidManifest.xml
 
       - name: Set up Java 17
         uses: actions/setup-java@v4
