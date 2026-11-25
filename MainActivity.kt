@@ -28,6 +28,7 @@ import android.graphics.Color
 import android.graphics.Typeface
 import androidx.core.app.ActivityCompat
 import androidx.core.content.ContextCompat
+import androidx.documentfile.provider.DocumentFile
 import org.json.JSONArray
 import org.json.JSONObject
 import java.util.Locale
@@ -56,6 +57,8 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
     private val localAi = LocalAiEngine()
     private val whisper = WhisperEngine()
     private val requestWhisperModel = 106
+    private val requestDownloadFolder = 108
+    private val PREF_DOWNLOAD_TREE = "jarvis_download_tree_uri"
     private val whisperModelFile by lazy { java.io.File(getExternalFilesDir(Environment.DIRECTORY_DOWNLOADS) ?: filesDir, WHISPER_MODEL_FILENAME) }
     @Volatile private var activityVisible = false
     private val requestLocalModel = 105
@@ -303,6 +306,7 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
         super.onResume()
         activityVisible = true
         updatePermissionStatus()
+        scanGrantedDownloadFolder()
         if (!autoMicStarted) {
             autoMicStarted = true
             if (ContextCompat.checkSelfPermission(this, Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED) beginListening()
@@ -368,18 +372,114 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
     }
 
     private fun promptWhisperModelDownload() {
-        val choices = arrayOf("دانلود با Google Chrome", "دانلود با دانلودر گوشی", "ارسال لینک به ADM", "کپی لینک مستقیم", "انتخاب فایل دانلودشده", "بعداً")
-        AlertDialog.Builder(this).setTitle("مدل تشخیص صدای فارسی Whisper")
-            .setMessage("مدل فارسی Whisper Base حدود ۸۲ مگابایت است. می‌توانی آن را با ADM دریافت کنی و بعد فایل را انتخاب کنی.")
+        showModelDownloadDialog(
+            title = "مدل تشخیص صدای فارسی Whisper",
+            description = "فایل مدل Whisper Base حدود ۸۲ مگابایت است. دانلود مستقیم یا دانلود با Chrome و ADM را انتخاب کن.",
+            url = WHISPER_MODEL_URL,
+            fileName = WHISPER_MODEL_FILENAME,
+            isWhisper = true
+        )
+    }
+
+    private fun showModelDownloadDialog(title: String, description: String, url: String, fileName: String, isWhisper: Boolean) {
+        val choices = arrayOf("دانلود با برنامه دلخواه (Chrome / ADM)", "دانلود مستقیم داخل JARVIS", "کپی لینک مستقیم", "بعداً")
+        AlertDialog.Builder(this).setTitle(title).setMessage("$description\n\nلینک مستقیم:\n$url")
             .setItems(choices) { _, which ->
                 when (which) {
-                    0 -> openWhisperInChrome()
-                    1 -> enqueueWhisperDownload()
-                    2 -> shareWhisperModelLink()
-                    3 -> copyWhisperModelLink()
-                    4 -> selectWhisperModelFile()
+                    0 -> {
+                        prefs.edit().putString("pending_external_model", if (isWhisper) "whisper" else "qwen").apply()
+                        ensureDownloadFolderPermissionThenChooseApp()
+                    }
+                    1 -> if (isWhisper) enqueueWhisperDownload() else enqueueRecommendedModelDownload()
+                    2 -> copyDirectModelLink(url, fileName)
                 }
             }.show()
+    }
+
+    private fun copyDirectModelLink(url: String, label: String) {
+        val clipboard = getSystemService(Context.CLIPBOARD_SERVICE) as android.content.ClipboardManager
+        clipboard.setPrimaryClip(android.content.ClipData.newPlainText(label, url))
+        reply("لینک مستقیم کپی شد.")
+    }
+
+    private fun ensureDownloadFolderPermissionThenChooseApp() {
+        val saved = prefs.getString(PREF_DOWNLOAD_TREE, null)
+        if (!saved.isNullOrBlank()) {
+            launchExternalModelChooser()
+            return
+        }
+        AlertDialog.Builder(this)
+            .setTitle("اتصال خودکار فایل دانلودشده")
+            .setMessage("برای اینکه بعد از دانلود با Chrome یا ADM فایل بدون انتخاب دستی وارد JARVIS شود، فقط یک‌بار پوشه Downloads را انتخاب و اجازه دسترسی بده. سپس برنامه فایل مدل را خودکار پیدا و وارد می‌کند.")
+            .setPositiveButton("انتخاب پوشه Downloads") { _, _ ->
+                val intent = Intent(Intent.ACTION_OPEN_DOCUMENT_TREE)
+                startActivityForResult(intent, requestDownloadFolder)
+            }
+            .setNegativeButton("لغو", null).show()
+    }
+
+    private fun launchExternalModelChooser() {
+        val kind = prefs.getString("pending_external_model", "whisper") ?: "whisper"
+        val url = if (kind == "qwen") MODEL_URL else WHISPER_MODEL_URL
+        val intent = Intent(Intent.ACTION_VIEW, Uri.parse(url)).apply { addCategory(Intent.CATEGORY_BROWSABLE) }
+        try {
+            startActivity(Intent.createChooser(intent, "برای دانلود مدل JARVIS کدام برنامه را باز کنم؟"))
+        } catch (e: Exception) {
+            reply("برنامه دانلود سازگار پیدا نشد؛ لینک مستقیم را کپی کن.")
+        }
+    }
+
+    private fun scanGrantedDownloadFolder() {
+        val raw = prefs.getString(PREF_DOWNLOAD_TREE, null) ?: return
+        val tree = try { DocumentFile.fromTreeUri(this, Uri.parse(raw)) } catch (_: Exception) { null } ?: return
+        executor.execute {
+            try {
+                val kind = prefs.getString("pending_external_model", "") ?: ""
+                if (kind.isBlank()) return@execute
+                val expected = if (kind == "qwen") MODEL_FILENAME else WHISPER_MODEL_FILENAME
+                val found = findModelDocument(tree, expected, 4) ?: return@execute
+                val target = if (kind == "qwen") localModelFile else whisperModelFile
+                if (target.isFile && target.length() == found.length()) return@execute
+                val temp = java.io.File(target.parentFile, target.name + ".importing")
+                target.parentFile?.mkdirs()
+                val uri = found.uri
+                contentResolver.openInputStream(uri)?.use { input ->
+                    temp.outputStream().buffered(1024 * 1024).use { output -> input.copyTo(output, 1024 * 1024) }
+                } ?: throw IllegalStateException("فایل دانلودشده قابل خواندن نیست")
+                if (kind == "qwen") {
+                    require(temp.length() > 2_000_000_000L) { "فایل GGUF هنوز کامل دانلود نشده است" }
+                    temp.inputStream().use { stream ->
+                        val magic = ByteArray(4)
+                        require(stream.read(magic) == 4 && String(magic, Charsets.US_ASCII) == "GGUF") { "فایل دانلودشده GGUF نیست" }
+                    }
+                } else {
+                    require(temp.length() > 50_000_000L) { "فایل Whisper هنوز کامل دانلود نشده است" }
+                }
+                if (target.exists()) target.delete()
+                check(temp.renameTo(target)) { "ذخیره فایل مدل ناموفق بود" }
+                prefs.edit().remove("pending_external_model").apply()
+                if (kind == "qwen") {
+                    prefs.edit().putString("local_model_path", target.absolutePath).putBoolean("local_ai_enabled", true).apply()
+                    runOnUiThread { reply("مدل Qwen از پوشه دانلودها به‌صورت خودکار وارد شد؛ در حال فعال‌سازی…"); loadLocalModel(target) }
+                } else {
+                    runOnUiThread { reply("مدل Whisper از پوشه دانلودها به‌صورت خودکار وارد شد؛ در حال بارگذاری…"); loadWhisperModel(target) }
+                }
+            } catch (e: Exception) {
+                runOnUiThread { status.text = "واردسازی خودکار مدل: ${e.message ?: "در انتظار تکمیل دانلود"}" }
+            }
+        }
+    }
+
+    private fun findModelDocument(folder: DocumentFile, expectedName: String, depth: Int): DocumentFile? {
+        if (depth < 0 || !folder.isDirectory) return null
+        for (item in folder.listFiles()) {
+            if (item.isFile && item.name == expectedName) return item
+            if (item.isDirectory) {
+                val nested = findModelDocument(item, expectedName, depth - 1)
+                if (nested != null) return nested
+            }
+        }
+        return null
     }
 
     private fun openWhisperInChrome() {
@@ -387,14 +487,8 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
             addCategory(Intent.CATEGORY_BROWSABLE)
             setPackage("com.android.chrome")
         }
-        try {
-            startActivity(view)
-            reply("لینک مدل در Google Chrome باز شد؛ پس از دانلود، فایل را از تنظیمات JARVIS انتخاب کن.")
-        } catch (_: Exception) {
-            val fallback = Intent(Intent.ACTION_VIEW, Uri.parse(WHISPER_MODEL_URL)).apply { addCategory(Intent.CATEGORY_BROWSABLE) }
-            try { startActivity(Intent.createChooser(fallback, "انتخاب مرورگر برای دانلود مدل")) }
-            catch (_: Exception) { reply("مرورگر سازگار پیدا نشد؛ از گزینه ADM یا کپی لینک استفاده کن.") }
-        }
+        try { startActivity(view) }
+        catch (_: Exception) { launchExternalModelChooser() }
     }
 
     private fun shareWhisperModelLink() {
@@ -406,11 +500,7 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
         startActivity(Intent.createChooser(send, "ارسال لینک با ADM یا برنامه دیگر"))
     }
 
-    private fun copyWhisperModelLink() {
-        val clipboard = getSystemService(Context.CLIPBOARD_SERVICE) as android.content.ClipboardManager
-        clipboard.setPrimaryClip(android.content.ClipData.newPlainText("Whisper Persian model", WHISPER_MODEL_URL))
-        reply("لینک مدل فارسی Whisper کپی شد؛ آن را در ADM وارد کن و پس از دانلود فایل را انتخاب کن.")
-    }
+    private fun copyWhisperModelLink() = copyDirectModelLink(WHISPER_MODEL_URL, WHISPER_MODEL_FILENAME)
 
     private fun enqueueWhisperDownload() {
         try {
@@ -423,15 +513,12 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
                 .setDestinationInExternalFilesDir(this, Environment.DIRECTORY_DOWNLOADS, WHISPER_MODEL_FILENAME)
             val id = (getSystemService(Context.DOWNLOAD_SERVICE) as DownloadManager).enqueue(request)
             prefs.edit().putLong(KEY_WHISPER_DOWNLOAD_ID, id).apply()
-            reply("دانلود مدل فارسی Whisper آغاز شد.")
+            reply("دانلود مدل فارسی Whisper آغاز شد؛ پس از پایان خودکار بارگذاری می‌شود.")
         } catch (e: Exception) { reply("شروع دانلود Whisper ممکن نشد: " + (e.message ?: "خطا")) }
     }
 
     private fun selectWhisperModelFile() {
-        val pick = Intent(Intent.ACTION_OPEN_DOCUMENT).apply {
-            addCategory(Intent.CATEGORY_OPENABLE)
-            type = "application/octet-stream"
-        }
+        val pick = Intent(Intent.ACTION_OPEN_DOCUMENT).apply { addCategory(Intent.CATEGORY_OPENABLE); type = "application/octet-stream" }
         startActivityForResult(pick, requestWhisperModel)
     }
 
@@ -446,8 +533,7 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
                 require(whisperModelFile.length() > 50000000L) { "فایل انتخاب‌شده اندازه مدل Whisper را ندارد." }
                 whisper.load(whisperModelFile.absolutePath)
                 runOnUiThread { reply("مدل فارسی Whisper بارگذاری شد؛ تشخیص صدا داخل JARVIS انجام می‌شود.") }
-            } catch (e: Exception) {
-                runOnUiThread { reply("وارد کردن مدل Whisper ناموفق بود: " + (e.message ?: "خطا")) }
+            } catch (e: Exception) { runOnUiThread { reply("وارد کردن مدل Whisper ناموفق بود: " + (e.message ?: "خطا")) }
             }
         }
     }
@@ -458,8 +544,7 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
             try {
                 whisper.load(file.absolutePath)
                 runOnUiThread { status.text = "Whisper فارسی آماده است."; if (activityVisible) captureAndTranscribe() }
-            } catch (e: Exception) {
-                runOnUiThread { reply("بارگذاری مدل Whisper ناموفق بود: " + (e.message ?: "خطا")) }
+            } catch (e: Exception) { runOnUiThread { reply("بارگذاری مدل Whisper ناموفق بود: " + (e.message ?: "خطا")) }
             }
         }
     }
@@ -472,10 +557,7 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
                 whisperModelFile.isFile && whisperModelFile.length() > 50000000L) {
                 prefs.edit().remove(KEY_WHISPER_DOWNLOAD_ID).apply()
                 loadWhisperModel(whisperModelFile)
-            } else {
-                prefs.edit().remove(KEY_WHISPER_DOWNLOAD_ID).apply()
-                reply("دانلود مدل Whisper کامل یا معتبر نبود.")
-            }
+            } else { prefs.edit().remove(KEY_WHISPER_DOWNLOAD_ID).apply(); reply("دانلود مدل Whisper کامل یا معتبر نبود.") }
         }
     }
 
@@ -539,6 +621,17 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
         if (requestCode == requestLocalModel && resultCode == RESULT_OK) {
             val uri = data?.data
             if (uri != null) copyAndLoadLocalModel(uri) else reply("فایلی انتخاب نشد")
+            return
+        }
+        if (requestCode == requestDownloadFolder && resultCode == RESULT_OK) {
+            val uri = data?.data
+            if (uri != null) {
+                try {
+                    contentResolver.takePersistableUriPermission(uri, Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_WRITE_URI_PERMISSION)
+                    prefs.edit().putString(PREF_DOWNLOAD_TREE, uri.toString()).apply()
+                    launchExternalModelChooser()
+                } catch (e: Exception) { reply("اجازه پوشه دانلود ذخیره نشد: ${e.message ?: "خطا"}") }
+            }
             return
         }
         if (requestCode == requestWhisperModel && resultCode == RESULT_OK) {
@@ -738,18 +831,18 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
         }
         AlertDialog.Builder(this)
             .setTitle("روش دریافت مغز هوشمند JARVIS")
-            .setMessage("مدل پیشنهادی Qwen3-4B-Instruct حدود ۲.۵ گیگابایت است. روش دریافت را خودت انتخاب کن. اگر با ADM دانلود کردی، بعد از پایان از گزینه «انتخاب فایل دانلودشده» فایل GGUF را وارد کن.")
+            .setMessage("مدل پیشنهادی Qwen3-4B-Instruct حدود ۲.۵ گیگابایت است. می‌توانی Chrome، ADM یا دانلود مستقیم JARVIS را انتخاب کنی. برای واردسازی خودکار از دانلودر بیرونی، فقط یک‌بار پوشه Downloads را مجاز کن.")
             .setItems(arrayOf(
-                "دانلود با دانلودر خود گوشی",
-                "ارسال لینک دانلود به ADM یا برنامه دیگر",
+                "دانلود با برنامه دلخواه (Chrome / ADM)",
+                "دانلود مستقیم داخل JARVIS",
                 "کپی لینک مستقیم دانلود",
                 "انتخاب فایل مدل دانلودشده",
                 "بعداً"
             )) { _, which ->
                 when (which) {
-                    0 -> enqueueRecommendedModelDownload()
-                    1 -> shareRecommendedModelLink()
-                    2 -> copyRecommendedModelLink()
+                    0 -> { prefs.edit().putString("pending_external_model", "qwen").apply(); ensureDownloadFolderPermissionThenChooseApp() }
+                    1 -> enqueueRecommendedModelDownload()
+                    2 -> copyDirectModelLink(MODEL_URL, MODEL_FILENAME)
                     3 -> selectLocalModel()
                     else -> { }
                 }
