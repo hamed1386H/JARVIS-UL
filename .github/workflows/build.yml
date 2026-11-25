@@ -26,6 +26,7 @@ jobs:
       - name: Apply latest in-app voice input implementation
         run: |
           install -D MainActivity.kt jarvis-source/app/src/main/java/com/chtai/assistant/MainActivity.kt
+          install -D JarvisAgentCore.kt jarvis-source/app/src/main/java/com/chtai/assistant/JarvisAgentCore.kt
           install -D WakeWordService.kt jarvis-source/app/src/main/java/com/chtai/assistant/WakeWordService.kt
           install -D JarvisOrbView.kt jarvis-source/app/src/main/java/com/chtai/assistant/JarvisOrbView.kt
           install -D WhisperEngine.kt jarvis-source/app/src/main/java/com/chtai/assistant/WhisperEngine.kt
