@@ -1,4 +1,5 @@
 name: Build JARVIS APK from source ZIP
+# Local AI target: Qwen3-4B-Q4_K_M via llama.cpp; model weights are downloaded separately by the app.
 
 on:
   workflow_dispatch:
