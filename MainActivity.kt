@@ -564,9 +564,11 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
         val dialog = AlertDialog.Builder(this)
             .setTitle(title)
             .setView(panel)
-            .setPositiveButton("انتخاب برنامه دانلود") { _, _ ->
-                prefs.edit().putString("pending_external_model", if (isWhisper) "whisper" else "qwen").apply()
-                ensureDownloadFolderPermissionThenChooseApp()
+            .setPositiveButton("باز کردن لینک دانلود") { _, _ ->
+                try {
+                    val view = Intent(Intent.ACTION_VIEW, Uri.parse(url)).apply { addCategory(Intent.CATEGORY_BROWSABLE) }
+                    startActivity(Intent.createChooser(view, "دانلود فایل مدل با مرورگر یا ADM"))
+                } catch (_: Exception) { copyDirectModelLink(url, fileName) }
             }
             .setNeutralButton("دانلود مستقیم داخل JARVIS") { _, _ ->
                 if (isWhisper) enqueueWhisperDownload() else enqueueRecommendedModelDownload()
@@ -1088,7 +1090,7 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
         }
         showModelDownloadDialog(
             title = "دریافت مغز هوشمند JARVIS",
-            description = "مدل Qwen3-4B-Instruct حدود ۲٫۵ گیگابایت است. با انتخاب برنامه دانلود، Chrome یا ADM را انتخاب کن. پس از دانلود، JARVIS فایل را از پوشه Downloads پیدا و خودش وارد و فعال می‌کند. فقط بار اول باید دسترسی پوشه دانلودها را بدهی.",
+            description = "مدل Qwen3-4B-Instruct حدود ۲٫۵ گیگابایت است. لینک مستقیم فایل رسمی Hugging Face باز می‌شود. برای دانلود کامل فضای خالی کافی داشته باش و نام فایل را تغییر نده. پس از دانلود، فایل را از گزینه انتخاب فایل مدل وارد کن.",
             url = MODEL_URL,
             fileName = MODEL_FILENAME,
             isWhisper = false
@@ -1146,6 +1148,7 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
                 .setMimeType("application/octet-stream")
                 .setAllowedOverMetered(true)
                 .setAllowedOverRoaming(false)
+                .setAllowedNetworkTypes(DownloadManager.Request.NETWORK_WIFI or DownloadManager.Request.NETWORK_MOBILE)
                 .setNotificationVisibility(DownloadManager.Request.VISIBILITY_VISIBLE_NOTIFY_COMPLETED)
                 .setDestinationInExternalFilesDir(this, Environment.DIRECTORY_DOWNLOADS, MODEL_FILENAME)
             val id = manager.enqueue(request)
@@ -1462,7 +1465,7 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
         private const val WHISPER_MODEL_URL = "https://huggingface.co/armantee/whisper-base-persian-ggml/resolve/main/ggml-base-persian-q8_0.bin"
         private const val KEY_WHISPER_DOWNLOAD_ID = "jarvis_whisper_download_id"
         private const val MODEL_FILENAME = "Qwen3-4B-Instruct-2507-Q4_K_M.gguf"
-        private const val MODEL_URL = "https://huggingface.co/bartowski/Qwen_Qwen3-4B-Instruct-2507-GGUF/resolve/main/Qwen3-4B-Instruct-2507-Q4_K_M.gguf?download=true"
+        private const val MODEL_URL = "https://huggingface.co/bartowski/Qwen_Qwen3-4B-Instruct-2507-GGUF/resolve/main/Qwen3-4B-Instruct-2507-Q4_K_M.gguf"
         private const val KEY_MODEL_DOWNLOAD_ID = "jarvis_model_download_id"
     }
 
