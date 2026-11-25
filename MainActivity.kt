@@ -28,7 +28,7 @@ import android.graphics.Color
 import android.graphics.Typeface
 import androidx.core.app.ActivityCompat
 import androidx.core.content.ContextCompat
-import androidx.documentfile.provider.DocumentFile
+import android.provider.DocumentsContract
 import org.json.JSONArray
 import org.json.JSONObject
 import java.util.Locale
@@ -526,7 +526,6 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
             text = url
             textSize = 11f
             setTextColor(Color.rgb(111, 215, 229))
-            textIsSelectable = true
             setTextIsSelectable(true)
             setPadding(dp(10), dp(10), dp(10), dp(10))
             background = glass(Color.rgb(7, 12, 27), Color.rgb(45, 70, 112), 12)
@@ -592,21 +591,22 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
         }
     }
 
+    private data class ModelDocument(val uri: Uri, val name: String, val isDirectory: Boolean, val length: Long)
+
     private fun scanGrantedDownloadFolder() {
         val raw = prefs.getString(PREF_DOWNLOAD_TREE, null) ?: return
-        val tree = try { DocumentFile.fromTreeUri(this, Uri.parse(raw)) } catch (_: Exception) { null } ?: return
+        val treeUri = Uri.parse(raw)
         executor.execute {
             try {
                 val kind = prefs.getString("pending_external_model", "") ?: ""
                 if (kind.isBlank()) return@execute
                 val expected = if (kind == "qwen") MODEL_FILENAME else WHISPER_MODEL_FILENAME
-                val found = findModelDocument(tree, expected, 4) ?: return@execute
+                val found = findModelDocument(treeUri, expected, 4) ?: return@execute
                 val target = if (kind == "qwen") localModelFile else whisperModelFile
-                if (target.isFile && target.length() == found.length()) return@execute
+                if (target.isFile && target.length() == found.length) return@execute
                 val temp = java.io.File(target.parentFile, target.name + ".importing")
                 target.parentFile?.mkdirs()
-                val uri = found.uri
-                contentResolver.openInputStream(uri)?.use { input ->
+                contentResolver.openInputStream(found.uri)?.use { input ->
                     temp.outputStream().buffered(1024 * 1024).use { output -> input.copyTo(output, 1024 * 1024) }
                 } ?: throw IllegalStateException("فایل دانلودشده قابل خواندن نیست")
                 if (kind == "qwen") {
@@ -615,31 +615,52 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
                         val magic = ByteArray(4)
                         require(stream.read(magic) == 4 && String(magic, Charsets.US_ASCII) == "GGUF") { "فایل دانلودشده GGUF نیست" }
                     }
-                } else {
-                    require(temp.length() > 50_000_000L) { "فایل Whisper هنوز کامل دانلود نشده است" }
-                }
+                } else require(temp.length() > 50_000_000L) { "فایل Whisper هنوز کامل دانلود نشده است" }
                 if (target.exists()) target.delete()
                 check(temp.renameTo(target)) { "ذخیره فایل مدل ناموفق بود" }
                 prefs.edit().remove("pending_external_model").apply()
                 if (kind == "qwen") {
                     prefs.edit().putString("local_model_path", target.absolutePath).putBoolean("local_ai_enabled", true).apply()
                     runOnUiThread { reply("مدل Qwen از پوشه دانلودها به‌صورت خودکار وارد شد؛ در حال فعال‌سازی…"); loadLocalModel(target) }
-                } else {
-                    runOnUiThread { reply("مدل Whisper از پوشه دانلودها به‌صورت خودکار وارد شد؛ در حال بارگذاری…"); loadWhisperModel(target) }
-                }
+                } else runOnUiThread { reply("مدل Whisper از پوشه دانلودها به‌صورت خودکار وارد شد؛ در حال بارگذاری…"); loadWhisperModel(target) }
             } catch (e: Exception) {
                 runOnUiThread { status.text = "واردسازی خودکار مدل: ${e.message ?: "در انتظار تکمیل دانلود"}" }
             }
         }
     }
 
-    private fun findModelDocument(folder: DocumentFile, expectedName: String, depth: Int): DocumentFile? {
-        if (depth < 0 || !folder.isDirectory) return null
-        for (item in folder.listFiles()) {
-            if (item.isFile && item.name == expectedName) return item
-            if (item.isDirectory) {
-                val nested = findModelDocument(item, expectedName, depth - 1)
-                if (nested != null) return nested
+    private fun findModelDocument(treeUri: Uri, expectedName: String, depth: Int): ModelDocument? {
+        if (depth < 0) return null
+        val parentId = try { DocumentsContract.getTreeDocumentId(treeUri) } catch (_: Exception) { return null }
+        return findModelDocumentInFolder(treeUri, parentId, expectedName, depth)
+    }
+
+    private fun findModelDocumentInFolder(treeUri: Uri, parentId: String, expectedName: String, depth: Int): ModelDocument? {
+        if (depth < 0) return null
+        val childrenUri = DocumentsContract.buildChildDocumentsUriUsingTree(treeUri, parentId)
+        val projection = arrayOf(
+            DocumentsContract.Document.COLUMN_DOCUMENT_ID,
+            DocumentsContract.Document.COLUMN_DISPLAY_NAME,
+            DocumentsContract.Document.COLUMN_MIME_TYPE,
+            DocumentsContract.Document.COLUMN_SIZE
+        )
+        contentResolver.query(childrenUri, projection, null, null, null)?.use { cursor ->
+            val idCol = cursor.getColumnIndex(DocumentsContract.Document.COLUMN_DOCUMENT_ID)
+            val nameCol = cursor.getColumnIndex(DocumentsContract.Document.COLUMN_DISPLAY_NAME)
+            val mimeCol = cursor.getColumnIndex(DocumentsContract.Document.COLUMN_MIME_TYPE)
+            val sizeCol = cursor.getColumnIndex(DocumentsContract.Document.COLUMN_SIZE)
+            while (cursor.moveToNext()) {
+                val id = cursor.getString(idCol)
+                val name = cursor.getString(nameCol) ?: ""
+                val mime = cursor.getString(mimeCol) ?: ""
+                val size = if (sizeCol >= 0 && !cursor.isNull(sizeCol)) cursor.getLong(sizeCol) else 0L
+                val uri = DocumentsContract.buildDocumentUriUsingTree(treeUri, id)
+                if (mime != DocumentsContract.Document.MIME_TYPE_DIR && name == expectedName)
+                    return ModelDocument(uri, name, false, size)
+                if (mime == DocumentsContract.Document.MIME_TYPE_DIR) {
+                    val nested = findModelDocumentInFolder(treeUri, id, expectedName, depth - 1)
+                    if (nested != null) return nested
+                }
             }
         }
         return null
@@ -922,17 +943,6 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
         val names = apps.map { it.loadLabel(packageManager).toString() }
         addLog("JARVIS", if (names.isEmpty()) "برنامه‌ای پیدا نشد" else "برنامه‌های قابل اجرا:\n" + names.joinToString("\n"))
         reply("فهرست ${names.size} برنامه را نمایش دادم")
-    }
-
-    private fun launchAppByName(name: String) {
-        val intent = Intent(Intent.ACTION_MAIN, null).addCategory(Intent.CATEGORY_LAUNCHER)
-        val match = packageManager.queryIntentActivities(intent, 0).firstOrNull {
-            normalize(it.loadLabel(packageManager).toString()).contains(name)
-        }
-        if (match == null) { reply("برنامه «$name» را پیدا نکردم"); return }
-        val label = match.loadLabel(packageManager).toString()
-        val launch = packageManager.getLaunchIntentForPackage(match.activityInfo.packageName)
-        if (launch != null) { reply("$label را باز می‌کنم"); startActivity(launch) } else reply("امکان باز کردن این برنامه وجود ندارد")
     }
 
     private fun volumeDialog() {
