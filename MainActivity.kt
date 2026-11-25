@@ -809,6 +809,12 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
 
     private fun handleCommand(raw: String) {
         val q = normalize(raw)
+        val requestedApp = extractAppLaunchTarget(q)
+        if (requestedApp != null) {
+            if (requestedApp.isBlank()) reply("نام برنامه را هم بگو")
+            else launchAppByName(requestedApp)
+            return
+        }
         when {
             q.contains("وای فای") || q.contains("wifi") -> { reply("پنل وای‌فای را باز می‌کنم؛ تغییر اتصال را از همان‌جا تأیید کن"); openWifi() }
             q.contains("بلوتوث") -> { reply("تنظیمات بلوتوث را باز می‌کنم"); openSettings(Settings.ACTION_BLUETOOTH_SETTINGS) }
@@ -827,16 +833,76 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
             q.contains("برنامه ها") || q.contains("اپلیکیشن") || q.contains("فهرست برنامه") -> showApps()
             q.contains("تنظیمات باتری") || q.contains("باتری") -> openSettings(Settings.ACTION_BATTERY_SAVER_SETTINGS)
             q.contains("تنظیمات") -> openSettings(Settings.ACTION_SETTINGS)
-            q.startsWith("باز کن") || q.startsWith("بازکن") -> {
-                val name = q.removePrefix("باز کن").removePrefix("بازکن").trim()
-                if (name.isBlank()) reply("نام برنامه را هم بگو") else launchAppByName(name)
-            }
-            q.endsWith("را باز کن") || q.endsWith("رو باز کن") -> {
-                val name = q.removeSuffix("را باز کن").removeSuffix("رو باز کن").trim()
-                if (name.isBlank()) reply("نام برنامه را هم بگو") else launchAppByName(name)
-            }
             else -> askLocal(raw)
         }
+    }
+
+    private fun extractAppLaunchTarget(command: String): String? {
+        val openVerbs = listOf("باز کن", "بازکن", "اجرا کن", "اجراکن", "راه اندازی کن", "راه بنداز", "open", "launch", "start", "run")
+        val q = command.trim()
+        for (verb in openVerbs) {
+            if (q.startsWith(verb + " ")) return q.removePrefix(verb).trim()
+            if (q == verb) return ""
+        }
+        val endings = listOf(" را باز کن", " رو باز کن", " را اجرا کن", " رو اجرا کن", " باز کن", " اجرا کن", " را بازکن", " رو بازکن")
+        for (ending in endings) if (q.endsWith(ending)) return q.removeSuffix(ending).trim()
+        return null
+    }
+
+    private fun appAliases(packageName: String): List<String> {
+        val aliases = mapOf(
+            "com.instagram.android" to listOf("instagram", "insta", "اینستاگرام", "اینستا", "اینستا گرام"),
+            "com.whatsapp" to listOf("whatsapp", "واتساپ", "واتس اپ", "واتسآپ"),
+            "org.telegram.messenger" to listOf("telegram", "تلگرام"),
+            "com.google.android.youtube" to listOf("youtube", "you tube", "یوتیوب", "یو تیوب"),
+            "com.android.chrome" to listOf("chrome", "google chrome", "کروم", "گوگل کروم"),
+            "com.google.android.gm" to listOf("gmail", "جیمیل", "جی میل"),
+            "com.google.android.apps.maps" to listOf("google maps", "maps", "نقشه", "گوگل مپ", "مپس"),
+            "com.google.android.apps.photos" to listOf("google photos", "photos", "گوگل فوتوز", "عکس ها"),
+            "com.spotify.music" to listOf("spotify", "اسپاتیفای", "اسپاتی فای"),
+            "com.google.android.apps.messaging" to listOf("messages", "google messages", "پیامک", "پیام ها"),
+            "com.google.android.dialer" to listOf("phone", "dialer", "تلفن", "تماس", "شماره گیر"),
+            "com.google.android.contacts" to listOf("contacts", "مخاطبین", "دفترچه تلفن"),
+            "com.facebook.katana" to listOf("facebook", "فیسبوک", "فیس بوک"),
+            "com.zhiliaoapp.musically" to listOf("tiktok", "تیک تاک", "تیکتاک"),
+            "com.snapchat.android" to listOf("snapchat", "اسنپ چت", "اسنپ‌چت"),
+            "com.netflix.mediaclient" to listOf("netflix", "نتفلیکس"),
+            "com.google.android.googlequicksearchbox" to listOf("google", "گوگل", "دستیار گوگل")
+        )
+        return aliases[packageName].orEmpty()
+    }
+
+    private fun launchAppByName(name: String) {
+        val target = normalize(name).trim().replace(Regex("\\s+"), " ")
+        if (target.isBlank()) { reply("نام برنامه را هم بگو"); return }
+        val launcher = Intent(Intent.ACTION_MAIN, null).addCategory(Intent.CATEGORY_LAUNCHER)
+        val candidates = packageManager.queryIntentActivities(launcher, 0)
+        data class AppMatch(val info: android.content.pm.ResolveInfo, val score: Int)
+        val matches = candidates.mapNotNull { info ->
+            val label = normalize(info.loadLabel(packageManager).toString()).trim()
+            val packageName = info.activityInfo.packageName.lowercase(Locale.ROOT)
+            val packageWords = packageName.substringAfterLast('.').replace(Regex("[._-]"), " ")
+            val allNames = (listOf(label, packageName, packageWords) + appAliases(packageName)).map { normalize(it).trim() }.filter { it.isNotBlank() }.distinct()
+            val score = when {
+                allNames.any { it == target } -> 100
+                allNames.any { it.replace(" ", "") == target.replace(" ", "") } -> 95
+                allNames.any { it.startsWith(target) || target.startsWith(it) } -> 80
+                allNames.any { it.contains(target) || target.contains(it) } -> 60
+                else -> 0
+            }
+            if (score > 0) AppMatch(info, score) else null
+        }.sortedByDescending { it.score }
+        val match = matches.firstOrNull()
+        if (match == null) {
+            reply("برنامه «$name» را در برنامه‌های نصب‌شده پیدا نکردم. نام فارسی یا انگلیسی آن را امتحان کن.")
+            return
+        }
+        val label = match.info.loadLabel(packageManager).toString()
+        val launch = packageManager.getLaunchIntentForPackage(match.info.activityInfo.packageName)
+        if (launch != null) {
+            reply("$label را باز می‌کنم")
+            try { startActivity(launch) } catch (_: Exception) { reply("باز کردن $label ممکن نشد") }
+        } else reply("برای $label میانبر اجرای مستقیم پیدا نکردم")
     }
 
     private fun openWifi() {
