@@ -4,7 +4,7 @@ on:
   workflow_dispatch:
   push:
     branches: [ main, master ]
-    paths: [ 'JARVIS_v1.3_LocalAI_GitHub.zip', 'MainActivity.kt', 'JarvisOrbView.kt', 'WhisperEngine.kt', 'jarvis_whisper.cpp', 'CMakeLists.txt', 'launcher-res/**', '.github/workflows/build.yml' ]
+    paths: [ 'JARVIS_v1.3_LocalAI_GitHub.zip', 'MainActivity.kt', 'JarvisOrbView.kt', 'WhisperEngine.kt', 'jarvis_whisper.cpp', 'WakeWordService.kt', 'CMakeLists.txt', 'launcher-res/**', '.github/workflows/build.yml' ]
 
 permissions:
   contents: read
@@ -26,6 +26,7 @@ jobs:
       - name: Apply latest in-app voice input implementation
         run: |
           install -D MainActivity.kt jarvis-source/app/src/main/java/com/chtai/assistant/MainActivity.kt
+          install -D WakeWordService.kt jarvis-source/app/src/main/java/com/chtai/assistant/WakeWordService.kt
           install -D JarvisOrbView.kt jarvis-source/app/src/main/java/com/chtai/assistant/JarvisOrbView.kt
           install -D WhisperEngine.kt jarvis-source/app/src/main/java/com/chtai/assistant/WhisperEngine.kt
           install -D jarvis_whisper.cpp jarvis-source/app/src/main/cpp/jarvis_whisper.cpp
