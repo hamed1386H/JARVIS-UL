@@ -55,6 +55,7 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
     private val conversation = JSONArray()
     private val maxHistoryMessages = 12
     private val localAi = LocalAiEngine()
+    private val agentCore by lazy { JarvisAgentCore(this) }
     private val whisper = WhisperEngine()
     private val requestWhisperModel = 106
     private val requestDownloadFolder = 108
@@ -253,7 +254,8 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
             "تنظیم صدا و روشنایی",
             "تنظیمات باتری",
             "پاک‌کردن تاریخچه گفتگو",
-            "دانلود و فعال‌سازی تشخیص صدای فارسی (Whisper)"
+            "دانلود و فعال‌سازی تشخیص صدای فارسی (Whisper)",
+            "تنظیم موتور هوش مصنوعی آنلاین (اختیاری)"
         )
         AlertDialog.Builder(this)
             .setTitle("تنظیمات JARVIS")
@@ -273,6 +275,7 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
                     11 -> openSettings(Settings.ACTION_BATTERY_SAVER_SETTINGS)
                     12 -> clearConversation()
                     13 -> promptWhisperModelDownload()
+                    14 -> showOnlineAiSettings()
                 }
             }
             .setNegativeButton("بستن", null)
@@ -1300,7 +1303,80 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
         }
     }
 
+    private fun showOnlineAiSettings() {
+        val panel = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(dp(20), dp(8), dp(20), dp(4))
+        }
+        val endpoint = EditText(this).apply {
+            hint = "آدرس کامل API سازگار با OpenAI؛ مثل https://.../v1/chat/completions"
+            setText(agentCore.endpoint())
+            textSize = 13f
+            setSingleLine(false)
+        }
+        val key = EditText(this).apply {
+            hint = "کلید API (اختیاری برای سرویس‌های بدون کلید)"
+            setText(agentCore.apiKey())
+            inputType = android.text.InputType.TYPE_CLASS_TEXT or android.text.InputType.TYPE_TEXT_VARIATION_PASSWORD
+            textSize = 13f
+        }
+        val model = EditText(this).apply {
+            hint = "نام مدل سرویس"
+            setText(agentCore.model())
+            textSize = 13f
+        }
+        panel.addView(TextView(this).apply { text = "اتصال آنلاین اختیاری است. آدرس باید endpoint سازگار با Chat Completions باشد؛ کلید فقط روی همین گوشی ذخیره می‌شود."; setTextColor(Color.LTGRAY); textSize = 13f })
+        panel.addView(endpoint); panel.addView(key); panel.addView(model)
+        AlertDialog.Builder(this).setTitle("موتور آنلاین JARVIS")
+            .setView(panel)
+            .setPositiveButton("ذخیره") { _, _ ->
+                agentCore.saveConfig(endpoint.text.toString().trim(), key.text.toString(), model.text.toString().trim())
+                reply(if (agentCore.isOnlineConfigured()) "تنظیمات موتور آنلاین ذخیره شد؛ ابتدا آنلاین و در صورت خطا محلی پاسخ می‌دهم." else "اتصال آنلاین غیرفعال شد؛ JARVIS از موتور محلی استفاده می‌کند.")
+            }
+            .setNeutralButton("پاک‌کردن اتصال") { _, _ ->
+                agentCore.saveConfig("", "", "")
+                reply("اطلاعات اتصال آنلاین پاک شد؛ حالت محلی فعال است.")
+            }
+            .setNegativeButton("بستن", null).show()
+    }
+
     private fun askLocal(prompt: String) {
+        // Prefer the configured online model; if it fails, continue with local Qwen.
+        if (agentCore.isOnlineConfigured()) {
+            status.text = "در حال اتصال به موتور آنلاین…"
+            orbView.setMode(JarvisOrbView.Mode.THINKING)
+            executor.execute {
+                try {
+                    val answer = agentCore.askOnline(prompt)
+                    runOnUiThread {
+                        addLog("شما", prompt)
+                        addConversationMessage("user", prompt)
+                        addLog("JARVIS • ONLINE", answer)
+                        addConversationMessage("assistant", answer)
+                        status.text = "پاسخ آنلاین آماده شد"
+                        speak(answer)
+                    }
+                    return@execute
+                } catch (e: Exception) {
+                    runOnUiThread { status.text = "اتصال آنلاین ناموفق؛ تلاش با موتور محلی…" }
+                }
+                if (!localAi.isLoaded()) {
+                    runOnUiThread { reply("موتور آنلاین در دسترس نیست و مدل محلی هم بارگذاری نشده؛ تنظیمات اتصال یا دانلود Qwen را بررسی کن.") }
+                    return@execute
+                }
+                try {
+                    val answer = localAi.generate(agentCore.buildLocalPrompt(prompt, conversation), 256).trim()
+                    runOnUiThread {
+                        addLog("شما", prompt); addConversationMessage("user", prompt)
+                        addLog("JARVIS • LOCAL", answer); addConversationMessage("assistant", answer)
+                        status.text = "پاسخ محلی آماده شد"; speak(answer)
+                    }
+                } catch (e: Exception) {
+                    runOnUiThread { reply("خطای موتور محلی: ${e.message ?: "نامشخص"}") }
+                }
+            }
+            return
+        }
         if (!prefs.getBoolean("local_ai_enabled", true)) {
             reply("هوش مصنوعی خاموش است. از تنظیمات JARVIS آن را فعال کن؛ فرمان‌های پایه همچنان کار می‌کنند.")
             return
