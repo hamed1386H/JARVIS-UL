@@ -376,14 +376,67 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
 
     private fun beginListening() {
         if (ContextCompat.checkSelfPermission(this, Manifest.permission.RECORD_AUDIO) != PackageManager.PERMISSION_GRANTED) {
-            ActivityCompat.requestPermissions(this, arrayOf(Manifest.permission.RECORD_AUDIO), requestMic); return
+            ActivityCompat.requestPermissions(this, arrayOf(Manifest.permission.RECORD_AUDIO), requestMic)
+            return
         }
-        val intent = Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH).apply {
-            putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM)
-            putExtra(RecognizerIntent.EXTRA_LANGUAGE, "fa-IR")
-            putExtra(RecognizerIntent.EXTRA_PROMPT, "بگو چه کاری انجام بدهم")
+        if (!SpeechRecognizer.isRecognitionAvailable(this)) {
+            reply("موتور تشخیص گفتار روی گوشی در دسترس نیست")
+            return
         }
-        try { startActivityForResult(intent, requestSpeech) } catch (_: Exception) { reply("تشخیص گفتار روی این گوشی در دسترس نیست") }
+        try {
+            speechRecognizer?.cancel()
+            speechRecognizer?.destroy()
+            speechRecognizer = SpeechRecognizer.createSpeechRecognizer(this)
+            speechRecognizer?.setRecognitionListener(object : RecognitionListener {
+                override fun onReadyForSpeech(params: Bundle?) {
+                    status.text = "JARVIS گوش می‌دهد…"
+                }
+                override fun onBeginningOfSpeech() {
+                    status.text = "صدایت را دریافت کردم…"
+                }
+                override fun onRmsChanged(rmsdB: Float) {}
+                override fun onBufferReceived(buffer: ByteArray?) {}
+                override fun onEndOfSpeech() {
+                    status.text = "در حال تشخیص گفتار…"
+                }
+                override fun onError(error: Int) {
+                    status.text = when (error) {
+                        SpeechRecognizer.ERROR_NO_MATCH, SpeechRecognizer.ERROR_SPEECH_TIMEOUT -> "صدایی تشخیص داده نشد؛ دوباره تلاش کن"
+                        SpeechRecognizer.ERROR_INSUFFICIENT_PERMISSIONS -> "مجوز میکروفون لازم است"
+                        else -> "تشخیص گفتار ناموفق بود؛ دوباره تلاش کن"
+                    }
+                    speechRecognizer?.destroy()
+                    speechRecognizer = null
+                }
+                override fun onResults(results: Bundle?) {
+                    val words = results?.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION)?.firstOrNull().orEmpty()
+                    speechRecognizer?.destroy()
+                    speechRecognizer = null
+                    if (words.isNotBlank()) {
+                        addLog("شما", words)
+                        handleCommand(words)
+                    } else {
+                        status.text = "متوجه صحبتت نشدم؛ دوباره بگو"
+                    }
+                }
+                override fun onPartialResults(partialResults: Bundle?) {
+                    val partial = partialResults?.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION)?.firstOrNull()
+                    if (!partial.isNullOrBlank()) status.text = partial
+                }
+                override fun onEvent(eventType: Int, params: Bundle?) {}
+            })
+            val request = Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH).apply {
+                putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM)
+                putExtra(RecognizerIntent.EXTRA_LANGUAGE, "fa-IR")
+                putExtra(RecognizerIntent.EXTRA_PARTIAL_RESULTS, true)
+                putExtra(RecognizerIntent.EXTRA_MAX_RESULTS, 3)
+            }
+            speechRecognizer?.startListening(request)
+        } catch (_: Exception) {
+            speechRecognizer?.destroy()
+            speechRecognizer = null
+            reply("شروع تشخیص گفتار ممکن نشد")
+        }
     }
 
     private fun toggleWakeMode() {
@@ -448,10 +501,6 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
             val uri = data?.data
             if (uri != null) copyAndLoadLocalModel(uri) else reply("فایلی انتخاب نشد")
             return
-        }
-        if (requestCode == requestSpeech && resultCode == RESULT_OK) {
-            val words = data?.getStringArrayListExtra(RecognizerIntent.EXTRA_RESULTS)?.firstOrNull().orEmpty()
-            if (words.isNotBlank()) { addLog("شما", words); handleCommand(words) }
         }
     }
 
@@ -951,6 +1000,8 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
             try { unregisterReceiver(modelDownloadReceiver) } catch (_: Exception) { }
             modelReceiverRegistered = false
         }
+        try { speechRecognizer?.cancel(); speechRecognizer?.destroy() } catch (_: Exception) { }
+        speechRecognizer = null
         if (::tts.isInitialized) { tts.stop(); tts.shutdown() }
         // Queue native cleanup behind any active inference to avoid freeing the model mid-generation.
         try {
