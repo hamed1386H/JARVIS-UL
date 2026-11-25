@@ -45,9 +45,20 @@ jobs:
           yes | sdkmanager --sdk_root="$ANDROID_HOME" --licenses
           sdkmanager --sdk_root="$ANDROID_HOME" "platforms;android-35" "build-tools;35.0.0" "ndk;27.2.12479018" "cmake;3.22.1"
 
+      - name: Align Java and Kotlin JVM targets
+        run: |
+          cat > "$RUNNER_TEMP/jvm17.init.gradle" <<'EOF'
+          allprojects {
+            tasks.withType(org.gradle.api.tasks.compile.JavaCompile).configureEach {
+              sourceCompatibility = '17'
+              targetCompatibility = '17'
+            }
+          }
+          EOF
+
       - name: Build APK with local llama.cpp runtime
         working-directory: jarvis-source
-        run: gradle --no-daemon --max-workers=2 --stacktrace assembleDebug
+        run: gradle --no-daemon --max-workers=2 --stacktrace --init-script "$RUNNER_TEMP/jvm17.init.gradle" assembleDebug
 
       - name: Upload installable APK
         uses: actions/upload-artifact@v4
