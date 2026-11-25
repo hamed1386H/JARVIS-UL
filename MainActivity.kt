@@ -13,6 +13,9 @@ import android.content.Intent
 import android.content.pm.PackageManager
 import android.hardware.camera2.CameraManager
 import android.media.AudioManager
+import android.media.AudioRecord
+import android.media.AudioFormat
+import android.media.MediaRecorder
 import android.net.Uri
 import android.os.Bundle
 import android.provider.Settings
@@ -20,6 +23,7 @@ import android.speech.RecognizerIntent
 import android.speech.SpeechRecognizer
 import android.speech.RecognitionListener
 import android.speech.tts.TextToSpeech
+import android.speech.tts.UtteranceProgressListener
 import android.view.Gravity
 import android.view.View
 import android.widget.*
@@ -55,6 +59,10 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
     private val conversation = JSONArray()
     private val maxHistoryMessages = 12
     private val localAi = LocalAiEngine()
+    private val whisper = WhisperEngine()
+    private val requestWhisperModel = 106
+    private val whisperModelFile by lazy { java.io.File(getExternalFilesDir(Environment.DIRECTORY_DOWNLOADS) ?: filesDir, WHISPER_MODEL_FILENAME) }
+    @Volatile private var activityVisible = false
     private val requestLocalModel = 105
     private val localModelFile by lazy {
         val base = getExternalFilesDir(Environment.DIRECTORY_DOWNLOADS) ?: java.io.File(filesDir, "models")
@@ -77,6 +85,7 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
         buildUi()
         registerModelDownloadReceiver()
         autoLoadLocalModel()
+        autoLoadWhisperModel()
     }
 
     private fun buildUi() {
@@ -127,7 +136,8 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
             "تنظیمات بلوتوث",
             "تنظیم صدا و روشنایی",
             "تنظیمات باتری",
-            "پاک‌کردن تاریخچه گفتگو"
+            "پاک‌کردن تاریخچه گفتگو",
+            "دانلود و فعال‌سازی تشخیص صدای فارسی (Whisper)"
         )
         AlertDialog.Builder(this)
             .setTitle("تنظیمات JARVIS")
@@ -146,6 +156,7 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
                     10 -> volumeDialog()
                     11 -> openSettings(Settings.ACTION_BATTERY_SAVER_SETTINGS)
                     12 -> clearConversation()
+                    13 -> promptWhisperModelDownload()
                 }
             }
             .setNegativeButton("بستن", null)
@@ -286,6 +297,7 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
 
     override fun onResume() {
         super.onResume()
+        activityVisible = true
         updatePermissionStatus()
         if (!autoMicStarted) {
             autoMicStarted = true
@@ -295,7 +307,7 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
     }
 
     override fun onPause() {
-        // The foreground listening service intentionally continues while this screen is closed.
+        activityVisible = false
         super.onPause()
     }
 
