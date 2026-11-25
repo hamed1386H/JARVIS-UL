@@ -227,9 +227,16 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
         composer.addView(input, LinearLayout.LayoutParams(0, -2, 1f))
         composer.addView(actionButton("◉", "شروع صحبت با میکروفون") { beginListening() },
             LinearLayout.LayoutParams(dp(52), dp(48)).apply { marginEnd = dp(8) })
+        input.setOnEditorActionListener { _, actionId, event ->
+            val enterPressed = event?.keyCode == android.view.KeyEvent.KEYCODE_ENTER &&
+                event.action == android.view.KeyEvent.ACTION_UP
+            if (actionId == android.view.inputmethod.EditorInfo.IME_ACTION_SEND || enterPressed) {
+                submitTypedMessage()
+                true
+            } else false
+        }
         composer.addView(actionButton("➤", "ارسال پیام") {
-            val q = input.text.toString().trim()
-            if (q.isNotEmpty()) { input.setText(""); handleCommand(q) }
+            submitTypedMessage()
         }, LinearLayout.LayoutParams(dp(52), dp(48)))
         val quickActions = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
@@ -248,7 +255,7 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
     private fun glass(fill: Int, stroke: Int, radiusDp: Int): android.graphics.drawable.GradientDrawable = android.graphics.drawable.GradientDrawable().apply { setColor(fill); cornerRadius = dp(radiusDp).toFloat(); setStroke(dp(1), stroke) }
     private fun showJarvisSettings() {
         val items = arrayOf(
-            "دانلود و فعال‌سازی مغز هوشمند JARVIS (Qwen3-4B)",
+            "دانلود و فعال‌سازی مغز هوشمند JARVIS (Qwen3-1.7B)",
             "انتخاب فایل مدل GGUF دیگر",
             "تخلیه مدل از حافظه",
             "روشن / خاموش کردن هوش مصنوعی محلی",
@@ -311,6 +318,13 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
         setPadding(dp(8), dp(5), dp(8), dp(5))
         contentDescription = content
         setOnClickListener { action() }
+    }
+
+    private fun submitTypedMessage() {
+        val message = input.text?.toString()?.trim().orEmpty()
+        if (message.isBlank()) return
+        input.setText("")
+        handleCommand(message)
     }
 
     private fun addLog(who: String, message: String) {
@@ -640,7 +654,7 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
                     temp.outputStream().buffered(1024 * 1024).use { output -> input.copyTo(output, 1024 * 1024) }
                 } ?: throw IllegalStateException("فایل دانلودشده قابل خواندن نیست")
                 if (kind == "qwen") {
-                    require(temp.length() > 2_000_000_000L) { "فایل GGUF هنوز کامل دانلود نشده است" }
+                    require(temp.length() > 1_000_000_000L) { "فایل GGUF هنوز کامل دانلود نشده است" }
                     temp.inputStream().use { stream ->
                         val magic = ByteArray(4)
                         require(stream.read(magic) == 4 && String(magic, Charsets.US_ASCII) == "GGUF") { "فایل دانلودشده GGUF نیست" }
@@ -1189,14 +1203,14 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
             status.text = "دانلود مدل JARVIS در پس‌زمینه ادامه دارد؛ اعلان دانلود را بررسی کن."
             return
         }
-        if (localModelFile.exists() && isValidGguf(localModelFile, 2_000_000_000L)) {
+        if (localModelFile.exists() && isValidGguf(localModelFile, 1_000_000_000L)) {
             if (!localAi.isLoaded()) loadLocalModel(localModelFile)
             else reply("مغز هوشمند JARVIS از قبل فعال است.")
             return
         }
         showModelDownloadDialog(
             title = "دریافت مغز هوشمند JARVIS",
-            description = "مدل Qwen3-4B-Instruct حدود ۲٫۵ گیگابایت است. لینک مستقیم فایل رسمی Hugging Face باز می‌شود. برای دانلود کامل فضای خالی کافی داشته باش و نام فایل را تغییر نده. پس از دانلود، فایل را از گزینه انتخاب فایل مدل وارد کن.",
+            description = "مدل Qwen3-1.7B با حجم تقریبی حدود ۱ تا ۱٫۳ گیگابایت برای گوشی مناسب‌تر است. لینک مستقیم فایل GGUF باز می‌شود؛ برای دانلود و بارگذاری، فضای خالی کافی داشته باش و نام فایل را تغییر نده.",
             url = MODEL_URL,
             fileName = MODEL_FILENAME,
             isWhisper = false
@@ -1250,7 +1264,7 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
             val manager = getSystemService(Context.DOWNLOAD_SERVICE) as DownloadManager
             val request = DownloadManager.Request(Uri.parse(MODEL_URL))
                 .setTitle("دانلود مغز هوشمند JARVIS")
-                .setDescription("دریافت مدل Qwen3-4B-Instruct؛ حدود ۲.۵ گیگابایت")
+                .setDescription("دریافت مدل Qwen3-1.7B؛ حدود ۱ تا ۱.۳ گیگابایت")
                 .setMimeType("application/octet-stream")
                 .setAllowedOverMetered(true)
                 .setAllowedOverRoaming(false)
@@ -1280,7 +1294,7 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
                 if (!successful && reasonIndex >= 0) reason = "دانلود با خطا متوقف شد (کد ${it.getInt(reasonIndex)})."
             }
         }
-        if (successful && isValidGguf(localModelFile, 2_000_000_000L)) {
+        if (successful && isValidGguf(localModelFile, 1_000_000_000L)) {
             prefs.edit().putString("local_model_path", localModelFile.absolutePath).putBoolean("local_ai_enabled", true).remove(KEY_MODEL_DOWNLOAD_ID).apply()
             reply("دانلود مدل کامل شد. در حال بارگذاری مغز هوشمند روی گوشی…")
             loadLocalModel(localModelFile)
