@@ -17,14 +17,7 @@ android {
         externalNativeBuild { cmake { cppFlags '-std=c++17 -O3' } }
     }
     // This repository keeps its Android sources and manifest at the repository root.
-    sourceSets {
-        main {
-            manifest.srcFile 'AndroidManifest.xml'
-            java.srcDirs = ['.']
-            // Only compile the six Kotlin source files stored at repository root.
-            java.include '*.kt'
-        }
-    }
+    sourceSets { main { manifest.srcFile 'AndroidManifest.xml' } }
     externalNativeBuild {
         cmake { path 'CMakeLists.txt'; version '3.22.1' }
     }
@@ -35,9 +28,3 @@ dependencies {
     implementation 'androidx.documentfile:documentfile:1.0.1'
 }
 
-// The Kotlin source root is the repository root; order Android asset/class tasks first.
-tasks.configureEach {
-    if (name == 'compileDebugKotlin') {
-        dependsOn 'mergeDebugAssets', 'compressDebugAssets', 'mergeExtDexDebug', 'checkDebugDuplicateClasses', 'desugarDebugFileDependencies'
-    }
-}
