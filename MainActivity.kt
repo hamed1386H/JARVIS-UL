@@ -502,7 +502,7 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
                 }
                 recorder.stop()
                 val audio = FloatArray(samples.size) { samples[it] }
-                runOnUiThread { orbView.setAudioLevel(0f); orbView.setMode(JarvisOrbView.Mode.THINKING); status.text = "در حال تشخیص فارسی با Whisper…" }
+                runOnUiThread { orbView.setAudioLevel(0f); orbView.setMode(JarvisOrbView.Mode.THINKING); status.text = "در حال تشخیص خودکار زبان گفتار با Whisper…" }
                 if (audio.size < rate / 2) { runOnUiThread { status.text = "صدایی دریافت نشد؛ دوباره صحبت کن"; orbView.setMode(JarvisOrbView.Mode.IDLE) }; return@execute }
                 val words = whisper.transcribe(audio)
                 runOnUiThread { if (words.isNotBlank()) { addLog("شما", words); handleCommand(words) } else { status.text = "متوجه صحبتت نشدم؛ دوباره بگو"; orbView.setMode(JarvisOrbView.Mode.IDLE) } }
@@ -1457,7 +1457,7 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
             try {
                 val promptBuilder = StringBuilder()
                 promptBuilder.append("<|im_start|>system\n/no_think\n")
-                    .append("تو JARVIS هستی؛ دستیار فارسی‌زبان، دوستانه، دقیق و مسئولیت‌پذیر. همیشه به فارسی روان و محاوره‌ای پاسخ بده مگر کاربر زبان دیگری بخواهد. پاسخ را مستقیم و کاربردی نگه دار و اگر چیزی را نمی‌دانی صادقانه بگو.\n" +
+                    .append("تو JARVIS هستی؛ دستیار چندزبانه، دوستانه، دقیق و مسئولیت‌پذیر. زبان پیام فعلی کاربر را خودکار تشخیص بده و پاسخ را به همان زبان بنویس؛ اگر پیام ترکیبی است زبان غالب را انتخاب کن. فارسی را با املای روان و طبیعی بنویس. برای متن‌های کوتاه، غلط‌دار یا محاوره‌ای هم زبان را از بافت تشخیص بده. پاسخ را مستقیم و کاربردی نگه دار و اگر چیزی را نمی‌دانی صادقانه بگو.\n" +
                         "فرمان‌های واقعی فعلی فقط این‌ها هستند: باز کردن یک برنامه با نام آن؛ باز کردن پنل Wi-Fi؛ باز کردن تنظیمات Bluetooth؛ باز کردن تنظیمات باتری؛ روشن یا خاموش کردن چراغ‌قوه؛ تنظیم درصد روشنایی؛ تنظیم درصد صدای رسانه؛ باز کردن تنظیمات مزاحم نشو.\n" +
                         "اگر کاربر فقط سؤال یا گفت‌وگوی عادی دارد، پاسخ متنی طبیعی بده. اگر واقعاً درخواست اجرای یکی از فرمان‌های پشتیبانی‌شده را دارد، فقط یک JSON معتبر با قالب {\"type\":\"action\",\"command\":\"فرمان کوتاه فارسی\"} تولید کن و هیچ متن دیگری اضافه نکن. برای هر قابلیت دیگر بگو هنوز پیاده‌سازی نشده است. هرگز ادعا نکن کاری انجام شده؛ اجرای فرمان فقط پس از تأیید کاربر انجام می‌شود.\n<|im_end|>\n")
                 val first = (conversation.length() - 6).coerceAtLeast(0)
