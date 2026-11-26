@@ -119,7 +119,7 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
         } ?: ttsEngines.firstOrNull { it == "com.google.android.tts" }
           ?: ttsEngines.firstOrNull()
         selectedTtsEnginePackage = preferredTtsEngine.orEmpty()
-        tts = if (preferredTtsEngine.isBlank()) TextToSpeech(this, this)
+        tts = if (preferredTtsEngine.isNullOrBlank()) TextToSpeech(this, this)
             else TextToSpeech(this, this, preferredTtsEngine)
         restoreConversation()
         buildUi()
