@@ -250,46 +250,40 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
     private fun dp(value: Int): Int = (value * resources.displayMetrics.density).toInt()
     private fun glass(fill: Int, stroke: Int, radiusDp: Int): android.graphics.drawable.GradientDrawable = android.graphics.drawable.GradientDrawable().apply { setColor(fill); cornerRadius = dp(radiusDp).toFloat(); setStroke(dp(1), stroke) }
     private fun showJarvisSettings() {
-        val items = arrayOf(
-            "دانلود و فعال‌سازی مغز هوشمند JARVIS (Qwen3-1.7B)",
-            "انتخاب فایل مدل GGUF دیگر",
-            "تخلیه مدل از حافظه",
-            "روشن / خاموش کردن هوش مصنوعی محلی",
-            "انتخاب صدای دستیار",
-            "فعال / غیرفعال کردن گوش‌به‌زنگ",
-            "مدیریت مجوزهای گوشی",
-            "نمایش برنامه‌ها",
-            "تنظیمات وای‌فای",
-            "تنظیمات بلوتوث",
-            "تنظیم صدا و روشنایی",
-            "تنظیمات باتری",
-            "پاک‌کردن تاریخچه گفتگو",
-            "دانلود و فعال‌سازی تشخیص گفتار چندزبانه (Whisper)",
-            "تنظیم موتور هوش مصنوعی آنلاین (اختیاری)"
+        val groups = arrayOf(
+            "🧠 هوش مصنوعی و مدل‌ها" to arrayOf("دانلود / فعال‌سازی مدل محلی Qwen", "انتخاب فایل مدل GGUF", "تخلیه مدل از حافظه", "روشن / خاموش کردن هوش محلی", "تنظیم موتور هوش آنلاین"),
+            "🎙 صدا و گفتار" to arrayOf("انتخاب صدای خروجی JARVIS", "دانلود / فعال‌سازی تشخیص گفتار Whisper", "راهنمای نصب صدای فارسی گوشی"),
+            "📱 گوشی و دسترسی‌ها" to arrayOf("مدیریت مجوزهای گوشی", "برنامه‌های نصب‌شده", "تنظیمات وای‌فای", "تنظیمات بلوتوث", "صدا و روشنایی", "تنظیمات باتری"),
+            "⚙️ دستیار و اطلاعات" to arrayOf("فعال / غیرفعال کردن گوش‌به‌زنگ", "پاک‌کردن تاریخچه گفتگو", "درباره JARVIS")
         )
-        AlertDialog.Builder(this)
-            .setTitle("تنظیمات JARVIS")
-            .setItems(items) { _, which ->
-                when (which) {
-                    0 -> promptRecommendedModelDownload()
-                    1 -> selectLocalModel()
-                    2 -> unloadLocalModel()
-                    3 -> toggleLocalAi()
-                    4 -> showVoicePicker()
-                    5 -> toggleWakeMode()
-                    6 -> showPermissionCenter()
-                    7 -> showApps()
-                    8 -> openWifi()
-                    9 -> openSettings(Settings.ACTION_BLUETOOTH_SETTINGS)
-                    10 -> volumeDialog()
-                    11 -> openSettings(Settings.ACTION_BATTERY_SAVER_SETTINGS)
-                    12 -> clearConversation()
-                    13 -> promptWhisperModelDownload()
-                    14 -> showOnlineAiSettings()
-                }
-            }
-            .setNegativeButton("بستن", null)
-            .show()
+        val actions = arrayOf(
+            arrayOf<() -> Unit>({ promptRecommendedModelDownload() }, { selectLocalModel() }, { unloadLocalModel() }, { toggleLocalAi() }, { showOnlineAiSettings() }),
+            arrayOf<() -> Unit>({ showVoicePicker() }, { promptWhisperModelDownload() }, { showTtsHelp() }),
+            arrayOf<() -> Unit>({ showPermissionCenter() }, { showApps() }, { openWifi() }, { openSettings(Settings.ACTION_BLUETOOTH_SETTINGS) }, { volumeDialog() }, { openSettings(Settings.ACTION_BATTERY_SAVER_SETTINGS) }),
+            arrayOf<() -> Unit>({ toggleWakeMode() }, { clearConversation() }, { showAboutJarvis() })
+        )
+        AlertDialog.Builder(this).setTitle("تنظیمات JARVIS")
+            .setItems(groups.map { it.first }.toTypedArray()) { _, group ->
+                AlertDialog.Builder(this).setTitle(groups[group].first)
+                    .setItems(groups[group].second) { _, item -> actions[group][item].invoke() }
+                    .setNegativeButton("بازگشت") { _, _ -> showJarvisSettings() }
+                    .show()
+            }.setNegativeButton("بستن", null).show()
+    }
+
+    private fun showAboutJarvis() {
+        AlertDialog.Builder(this).setTitle("درباره JARVIS")
+            .setMessage("دستیار هوشمند فارسی با گفتگوی متنی، ورودی و خروجی صوتی، هوش محلی و اتصال آنلاین اختیاری.")
+            .setPositiveButton("باشه", null).show()
+    }
+
+    private fun showTtsHelp() {
+        AlertDialog.Builder(this).setTitle("فعال‌سازی صدای فارسی")
+            .setMessage("اگر JARVIS متن را می‌فهمد اما صدا پخش نمی‌کند، در تنظیمات گوشی وارد بخش تبدیل متن به گفتار (Text-to-speech output) شو، موتور گفتار را انتخاب کن و داده صوتی فارسی را نصب کن. سپس JARVIS را ببند و دوباره باز کن.")
+            .setPositiveButton("باز کردن تنظیمات گفتار") { _, _ ->
+                try { startActivity(Intent("com.android.settings.TTS_SETTINGS")) }
+                catch (_: Exception) { openSettings(Settings.ACTION_SETTINGS) }
+            }.setNegativeButton("بستن", null).show()
     }
 
     private fun weightParams() = LinearLayout.LayoutParams(0, -2, 1f).apply { setMargins(3, 3, 3, 3) }
@@ -1775,9 +1769,13 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
             val selectedPersianVoice = persianVoices.firstOrNull { it.name == savedVoice }
                 ?: persianVoices.maxByOrNull { it.quality }
             if (selectedPersianVoice != null) tts.setVoice(selectedPersianVoice)
-            ttsReady = result >= TextToSpeech.LANG_AVAILABLE && selectedPersianVoice != null
+            // Do not require an explicitly enumerated Persian Voice: some Android TTS engines
+            // support fa-IR through setLanguage while exposing an empty voices list.
+            ttsReady = result >= TextToSpeech.LANG_AVAILABLE
             if (!ttsReady) {
-                status.text = "صدای فارسی روی گوشی نصب نیست؛ از تنظیمات تبدیل متن به گفتار، صدای فارسی را نصب کن."
+                status.text = "صدای فارسی در موتور گفتار گوشی موجود نیست؛ از تنظیمات، داده گفتار فارسی را نصب کن."
+            } else if (persianVoices.isEmpty()) {
+                status.text = "موتور گفتار آماده است؛ اگر خروجی فارسی پخش نشد، صدای فارسی را از تنظیمات گوشی نصب کن."
             }
             if (ttsReady) pendingSpeech?.let { queued -> pendingSpeech = null; speak(queued) }
         }
