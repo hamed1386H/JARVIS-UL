@@ -245,7 +245,7 @@ class WakeWordService : Service() {
             val target = appTarget.replace(Regex("""\s+"""), "")
             val candidates = installed.mapNotNull { info ->
                 val label = packageManager.getApplicationLabel(info).toString()
-                val normalized = normalizeSpeech(label).replace(Regex("\\\s+"), "")
+                val normalized = normalizeSpeech(label).replace(Regex("""\s+"""), "")
                 val score = when {
                     normalized == target -> 100
                     normalized.startsWith(target) || target.startsWith(normalized) -> 80
