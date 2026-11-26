@@ -940,7 +940,7 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
                         if (voiceSessionActive) {
                             // In live conversation, recover the Android recognizer directly.
                             // Do not fall into the one-shot Whisper download flow after the first utterance.
-                            if (::voiceOrb.isInitialized) voiceOrb?.setAudioLevel(0f)
+                            voiceOrb?.setAudioLevel(0f)
                             setJarvisMode(JarvisOrbView.Mode.IDLE)
                             speechWatchdog.postDelayed({
                                 if (voiceSessionActive && activityVisible && !isFinishing &&
