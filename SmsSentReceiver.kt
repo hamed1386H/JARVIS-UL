@@ -22,9 +22,9 @@ class SmsSentReceiver : BroadcastReceiver() {
         val total = intent.getIntExtra(EXTRA_PART_COUNT, 1).coerceAtLeast(1)
         val prefs = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
         val key = batchId.toString()
-        val completedKey = "\${key}_completed"
-        val failedKey = "\${key}_failed"
-        val errorKey = "\${key}_error"
+        val completedKey = "${key}_completed"
+        val failedKey = "${key}_failed"
+        val errorKey = "${key}_error"
 
         val success = resultCode == android.app.Activity.RESULT_OK
         val completed = prefs.getInt(completedKey, 0) + 1
@@ -35,8 +35,8 @@ class SmsSentReceiver : BroadcastReceiver() {
             .putInt(completedKey, completed)
             .putBoolean(failedKey, failedBefore || !success)
             .putString(errorKey, errorNow ?: errorBefore)
-            .putString("\${key}_recipient", recipient)
-            .putInt("\${key}_total", total)
+            .putString("${key}_recipient", recipient)
+            .putInt("${key}_total", total)
             .apply()
 
         if (completed >= total) {
@@ -49,7 +49,7 @@ class SmsSentReceiver : BroadcastReceiver() {
             }
             showNotification(context, message)
             prefs.edit().remove(completedKey).remove(failedKey).remove(errorKey)
-                .remove("\${key}_recipient").remove("\${key}_total").apply()
+                .remove("${key}_recipient").remove("${key}_total").apply()
         }
     }
 
