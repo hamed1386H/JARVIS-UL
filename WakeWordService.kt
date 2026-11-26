@@ -23,6 +23,8 @@ class WakeWordService : Service() {
     private val notificationId = 7701
     private val wakeNotificationId = 7704
     private val answerNotificationId = 7705
+    private val backgroundLocalAi = LocalAiEngine()
+    private val backgroundLocalAiLoaded = AtomicBoolean(false)
 
     override fun onCreate() {
         super.onCreate()
@@ -168,6 +170,7 @@ class WakeWordService : Service() {
             try { recorder?.stop() } catch (_: Exception) {}
             try { recorder?.release() } catch (_: Exception) {}
             try { engine.unload() } catch (_: Exception) {}
+            try { backgroundLocalAi.unload(); backgroundLocalAiLoaded.set(false) } catch (_: Exception) {}
         }
     }
 
@@ -261,20 +264,26 @@ class WakeWordService : Service() {
         val modelFile = File(getExternalFilesDir(Environment.DIRECTORY_DOWNLOADS)
             ?: File(filesDir, "models"), "Qwen_Qwen3-1.7B-Q4_K_M.gguf")
         if (modelFile.isFile) {
-            val local = LocalAiEngine()
             try {
-                // Shorter, direct prompts and a smaller output budget reduce latency on-device.
-                local.load(modelFile.absolutePath, threads = Runtime.getRuntime().availableProcessors().coerceIn(3, 6), context = 1536)
+                // Keep Qwen loaded between commands: first response pays model-load cost,
+                // following responses avoid reloading the multi-gigabyte model.
+                if (backgroundLocalAiLoaded.compareAndSet(false, true)) {
+                    try {
+                        backgroundLocalAi.load(modelFile.absolutePath,
+                            threads = Runtime.getRuntime().availableProcessors().coerceIn(3, 6), context = 1536)
+                    } catch (loadError: Exception) {
+                        backgroundLocalAiLoaded.set(false)
+                        throw loadError
+                    }
+                }
                 val prompt = agent.buildLocalPrompt(
                     "فقط پاسخ کوتاه و مستقیم به فارسی بده. درخواست: " + command.take(900),
                     org.json.JSONArray()
                 )
-                return local.generate(prompt, 96).replace(Regex("<think>[\\s\\S]*?</think>"), "")
+                return backgroundLocalAi.generate(prompt, 96).replace(Regex("<think>[\\s\\S]*?</think>"), "")
                     .trim().ifBlank { "پاسخ خالی بود؛ دوباره بگو." }
             } catch (e: Exception) {
                 return "نتوانستم پاسخ را آماده کنم: " + (e.message ?: "خطای مدل محلی")
-            } finally {
-                try { local.unload() } catch (_: Exception) {}
             }
         }
         return "اتصال هوش آنلاین در دسترس نیست و مدل محلی هم آماده نیست. تنظیمات اتصال یا مدل را در JARVIS بررسی کن."
