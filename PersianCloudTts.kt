@@ -10,7 +10,15 @@ import java.net.URL
 class PersianCloudTts(context: Context) {
     private val prefs = context.getSharedPreferences("jarvis_persian_tts", Context.MODE_PRIVATE)
     fun apiKey(): String = prefs.getString("api_key", "") ?: ""
-    fun voiceId(): String = prefs.getString("voice_id", "pNInz6obpgDQGcFmaJgB") ?: "pNInz6obpgDQGcFmaJgB"
+    fun voiceId(): String {
+        val saved = prefs.getString("voice_id", null)
+        val jarvisVoice = "JBFqnCBsd6RMkjVDRZzb"
+        if (saved.isNullOrBlank() || saved == "pNInz6obpgDQGcFmaJgB") {
+            prefs.edit().putString("voice_id", jarvisVoice).apply()
+            return jarvisVoice
+        }
+        return saved
+    }
     fun saveConfig(key: String, voice: String) {
         prefs.edit().putString("api_key", key.trim()).putString("voice_id", voice.trim()).apply()
     }
@@ -37,7 +45,7 @@ class PersianCloudTts(context: Context) {
             val body = JSONObject()
                 .put("text", safeText)
                 .put("model_id", "eleven_multilingual_v2")
-                .put("voice_settings", JSONObject().put("stability", 0.58).put("similarity_boost", 0.82).put("style", 0.25).put("use_speaker_boost", true))
+                .put("voice_settings", JSONObject().put("stability", 0.68).put("similarity_boost", 0.82).put("style", 0.35).put("speed", 0.92).put("use_speaker_boost", true))
                 .toString()
             connection.outputStream.use { it.write(body.toByteArray(Charsets.UTF_8)) }
             val code = connection.responseCode
