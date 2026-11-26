@@ -1483,7 +1483,7 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
                     promptBuilder.append("<|im_start|>").append(role).append("\n").append(content).append("<|im_end|>\n")
                 }
                 promptBuilder.append("<|im_start|>user\n").append(prompt.take(1200)).append("<|im_end|>\n<|im_start|>assistant\n/no_think\n")
-                val answer = localAi.generate(promptBuilder.toString(), 160).trim()
+                val answer = localAi.generate(promptBuilder.toString(), 128).trim()
                     .replace(Regex("<think>[\\s\\S]*?</think>"), "").trim()
                 runOnUiThread {
                     addLog("شما", prompt)
