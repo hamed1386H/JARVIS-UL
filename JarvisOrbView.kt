@@ -57,10 +57,10 @@ class JarvisOrbView(context: Context) : View(context) {
         if (r <= 0f) return
 
         val accent = when (mode) {
-            Mode.LISTENING -> Color.rgb(55, 220, 255)
-            Mode.THINKING -> Color.rgb(164, 130, 255)
-            Mode.SPEAKING -> Color.rgb(75, 255, 215)
-            Mode.IDLE -> Color.rgb(73, 178, 255)
+            Mode.LISTENING -> Color.rgb(65, 190, 255)
+            Mode.THINKING -> Color.rgb(177, 105, 255)
+            Mode.SPEAKING -> Color.rgb(105, 135, 255)
+            Mode.IDLE -> Color.rgb(145, 105, 255)
         }
         val energy = (audioLevel * 0.7f) + if (mode == Mode.THINKING) 0.16f else 0f
         val breathing = 0.96f + pulse * 0.035f + energy * 0.08f
@@ -94,10 +94,10 @@ class JarvisOrbView(context: Context) : View(context) {
         canvas.rotate(-rotation, cx, cy)
         paint.strokeWidth = 2.6f
         paint.strokeCap = Paint.Cap.ROUND
-        paint.color = Color.argb(220, 91, 229, 255)
+        paint.color = Color.argb(225, 130, 112, 255)
         val oval = RectF(cx - r * 1.39f, cy - r * 1.39f, cx + r * 1.39f, cy + r * 1.39f)
         canvas.drawArc(oval, 208f, 72f, false, paint)
-        paint.color = Color.argb(135, 174, 144, 255)
+        paint.color = Color.argb(180, 70, 190, 255)
         canvas.drawArc(oval, 18f, 42f, false, paint)
         paint.strokeCap = Paint.Cap.BUTT
         canvas.restore()
@@ -120,10 +120,10 @@ class JarvisOrbView(context: Context) : View(context) {
         paint.shader = RadialGradient(
             cx - r * 0.32f, cy - r * 0.38f, r * 1.48f,
             intArrayOf(
-                Color.rgb(111, 174, 232),
-                Color.rgb(54, 92, 160),
-                Color.rgb(20, 39, 83),
-                Color.rgb(5, 11, 28)
+                Color.rgb(190, 165, 255),
+                Color.rgb(105, 76, 190),
+                Color.rgb(38, 27, 91),
+                Color.rgb(5, 7, 24)
             ),
             floatArrayOf(0f, 0.34f, 0.76f, 1f),
             Shader.TileMode.CLAMP
@@ -141,7 +141,7 @@ class JarvisOrbView(context: Context) : View(context) {
         paint.style = Paint.Style.FILL
         paint.shader = RadialGradient(
             cx, cy, r * 0.52f,
-            intArrayOf(Color.argb(220, 213, 251, 255), Color.argb(170, 78, 204, 255), Color.TRANSPARENT),
+            intArrayOf(Color.argb(230, 235, 220, 255), Color.argb(190, 145, 100, 255), Color.TRANSPARENT),
             floatArrayOf(0f, 0.22f, 1f),
             Shader.TileMode.CLAMP
         )
