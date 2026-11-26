@@ -251,7 +251,7 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
     private fun glass(fill: Int, stroke: Int, radiusDp: Int): android.graphics.drawable.GradientDrawable = android.graphics.drawable.GradientDrawable().apply { setColor(fill); cornerRadius = dp(radiusDp).toFloat(); setStroke(dp(1), stroke) }
     private fun showJarvisSettings() {
         val items = arrayOf(
-            "دانلود و فعال‌سازی مغز هوشمند JARVIS (Qwen3-4B)",
+            "دانلود و فعال‌سازی مغز هوشمند JARVIS (Qwen3-1.7B)",
             "انتخاب فایل مدل GGUF دیگر",
             "تخلیه مدل از حافظه",
             "روشن / خاموش کردن هوش مصنوعی محلی",
