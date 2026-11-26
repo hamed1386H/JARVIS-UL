@@ -49,8 +49,8 @@ class JarvisOrbView(context: Context) : GLSurfaceView(context) {
             val c=when(mode){Mode.LISTENING->floatArrayOf(.12f,.92f,.72f,1f);Mode.THINKING->floatArrayOf(.56f,.40f,1f,1f);Mode.SPEAKING->floatArrayOf(.12f,.70f,1f,1f);Mode.IDLE->floatArrayOf(.18f,.62f,.95f,1f)}
             GLES20.glUseProgram(program); GLES20.glUniformMatrix4fv(matrix,1,false,mvp,0); GLES20.glUniform4fv(color,1,c,0)
             GLES20.glUniform1f(timeLoc,t); GLES20.glUniform1f(energyLoc,energy); GLES20.glUniform1f(modeLoc,mode.ordinal.toFloat())
-            vertices?.position(0); GLES20.glEnableVertexAttribArray(position); GLES20.glVertexAttribPointer(position,3,GLES20.GL_FLOAT,false,12,vertices)
-            GLES20.glDrawElements(GLES20.GL_TRIANGLES,count,GLES20.GL_UNSIGNED_SHORT,indices); GLES20.glDisableVertexAttribArray(position)
+            vertices?.position(0); GLES20.glEnableVertexAttribArray(position); GLES20.glVertexAttribPointer(position,3,GLES20.GL_FLOAT,false,12,vertices!!)
+            GLES20.glDrawElements(GLES20.GL_TRIANGLES,count,GLES20.GL_UNSIGNED_SHORT,indices!!); GLES20.glDisableVertexAttribArray(position)
         }
         private fun sphere(stacks:Int,slices:Int) {
             val v=ArrayList<Float>(); val ix=ArrayList<Short>()
