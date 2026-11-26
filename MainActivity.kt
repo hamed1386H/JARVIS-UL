@@ -937,8 +937,19 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
                         if (!androidRecognitionActive || isFinishing) return@runOnUiThread
                         androidRecognitionActive = false
                         destroySpeechRecognizer()
-                        if (!voiceSessionActive) status.text = "سرویس گفتار اندروید پاسخ نداد؛ تشخیص آفلاین را امتحان می‌کنم…"
-                        startWhisperFallback()
+                        if (voiceSessionActive) {
+                            // In live conversation, recover the Android recognizer directly.
+                            // Do not fall into the one-shot Whisper download flow after the first utterance.
+                            if (::voiceOrb.isInitialized) voiceOrb?.setAudioLevel(0f)
+                            setJarvisMode(JarvisOrbView.Mode.IDLE)
+                            speechWatchdog.postDelayed({
+                                if (voiceSessionActive && activityVisible && !isFinishing &&
+                                    !androidRecognitionActive && !voiceCaptureActive.get()) beginListening()
+                            }, 850L)
+                        } else {
+                            status.text = "سرویس گفتار اندروید پاسخ نداد؛ تشخیص آفلاین را امتحان می‌کنم…"
+                            startWhisperFallback()
+                        }
                     }
                 }
                 override fun onResults(results: Bundle?) {
@@ -956,8 +967,16 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
                             }
                             handleCommand(text)
                         } else {
-                            if (!voiceSessionActive) status.text = "متنی از گفتار دریافت نشد؛ تشخیص آفلاین را امتحان می‌کنم…"
-                            startWhisperFallback()
+                            if (voiceSessionActive) {
+                                setJarvisMode(JarvisOrbView.Mode.IDLE)
+                                speechWatchdog.postDelayed({
+                                    if (voiceSessionActive && activityVisible && !isFinishing &&
+                                        !androidRecognitionActive && !voiceCaptureActive.get()) beginListening()
+                                }, 700L)
+                            } else {
+                                status.text = "متنی از گفتار دریافت نشد؛ تشخیص آفلاین را امتحان می‌کنم…"
+                                startWhisperFallback()
+                            }
                         }
                     }
                 }
