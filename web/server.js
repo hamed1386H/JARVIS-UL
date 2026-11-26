@@ -54,6 +54,8 @@ function auth(req, res, next) {
 const loginLimiter = rateLimit({ windowMs: 15 * 60 * 1000, limit: 10, standardHeaders: "draft-7", legacyHeaders: false });
 const chatLimiter = rateLimit({ windowMs: 60 * 1000, limit: 20, standardHeaders: "draft-7", legacyHeaders: false });
 
+app.get("/api/health", (req, res) => res.json({ ok: true, service: "JARVIS", brainConfigured: Boolean(AI_API_KEY) }));
+
 app.post("/api/login", loginLimiter, (req, res) => {
   if (!ACCESS_PASSWORD) return res.status(503).json({ error: "سرور هنوز رمز JARVIS_ACCESS_PASSWORD را تنظیم نکرده است." });
   const password = typeof req.body?.password === "string" ? req.body.password : "";

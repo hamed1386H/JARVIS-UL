@@ -1,0 +1,40 @@
+name: JARVIS web checks
+
+on:
+  push:
+    branches: [ main, master ]
+    paths:
+      - 'web/**'
+      - 'render.yaml'
+      - '.github/workflows/web-check.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: web
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: web/package.json
+      - name: Install dependencies
+        run: npm install --no-audit --no-fund
+      - name: Check JavaScript syntax
+        run: |
+          node --check server.js
+          node --check public/app.js
+      - name: Check required web assets
+        run: |
+          test -s public/index.html
+          test -s public/styles.css
+          test -s public/manifest.json
+          test -s public/sw.js
+          test -s public/icon.svg

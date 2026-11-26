@@ -1,0 +1,25 @@
+services:
+  - type: web
+    name: jarvis-central-brain
+    runtime: node
+    plan: starter
+    rootDir: web
+    buildCommand: npm install --no-audit --no-fund
+    startCommand: npm start
+    disk:
+      name: jarvis-memory
+      mountPath: /var/data
+      sizeGB: 1
+    envVars:
+      - key: NODE_VERSION
+        value: 20
+      - key: DATA_DIR
+        value: /var/data
+      - key: AI_BASE_URL
+        value: https://api.groq.com/openai/v1
+      - key: AI_MODEL
+        value: openai/gpt-oss-20b
+      - key: JARVIS_ACCESS_PASSWORD
+        sync: false
+      - key: AI_API_KEY
+        sync: false
