@@ -22,6 +22,10 @@ import android.provider.Settings
 import android.provider.ContactsContract
 import android.speech.tts.TextToSpeech
 import android.speech.tts.UtteranceProgressListener
+import android.speech.RecognitionListener
+import android.speech.RecognizerIntent
+import android.speech.SpeechRecognizer
+import androidx.core.view.WindowCompat
 import android.view.Gravity
 import android.view.View
 import android.widget.*
@@ -46,6 +50,8 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
     private lateinit var chatScroll: ScrollView
     private lateinit var input: EditText
     private lateinit var tts: TextToSpeech
+    private var speechRecognizer: SpeechRecognizer? = null
+    @Volatile private var androidRecognitionActive = false
     private var ttsReady = false
     @Volatile private var pendingSpeech: String? = null
     private var wakeMode = false
@@ -115,7 +121,8 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
             window.isStatusBarContrastEnforced = false
         }
         window.decorView.systemUiVisibility = View.SYSTEM_UI_FLAG_LAYOUT_STABLE
-        // Let Android resize the activity when the keyboard opens so chat and composer stay visible.
+        // Restore normal window fitting on Android 15 edge-to-edge devices; resize for the IME.
+        WindowCompat.setDecorFitsSystemWindows(window, true)
         window.setSoftInputMode(android.view.WindowManager.LayoutParams.SOFT_INPUT_ADJUST_RESIZE)
         val root = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
@@ -211,6 +218,18 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
             chatShell.visibility = if (show) View.VISIBLE else View.GONE
             composer.visibility = if (show) View.VISIBLE else View.GONE
             chatToggle.text = if (show) "بستن چت" else "چت"
+            if (show) {
+                input.requestFocus()
+                input.post {
+                    chatScroll.fullScroll(View.FOCUS_DOWN)
+                    (getSystemService(INPUT_METHOD_SERVICE) as? android.view.inputmethod.InputMethodManager)
+                        ?.showSoftInput(input, android.view.inputmethod.InputMethodManager.SHOW_IMPLICIT)
+                }
+            } else {
+                (getSystemService(INPUT_METHOD_SERVICE) as? android.view.inputmethod.InputMethodManager)
+                    ?.hideSoftInputFromWindow(input.windowToken, 0)
+                input.clearFocus()
+            }
         }
         val bottomControls = LinearLayout(this).apply { gravity = Gravity.CENTER; orientation = LinearLayout.HORIZONTAL }
         bottomControls.addView(chatToggle, LinearLayout.LayoutParams(0, dp(48), 1f).apply { marginEnd = dp(8) })
@@ -506,6 +525,10 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
             try { unregisterReceiver(wakeDetectedReceiver) } catch (_: Exception) {}
             wakeReceiverRegistered = false
         }
+        if (androidRecognitionActive) {
+            androidRecognitionActive = false
+            destroySpeechRecognizer()
+        }
         super.onPause()
     }
 
@@ -514,17 +537,109 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
             ActivityCompat.requestPermissions(this, arrayOf(Manifest.permission.RECORD_AUDIO), requestMic)
             return
         }
-        if (voiceCaptureActive.get()) {
-            status.text = "در حال شنیدن؛ کمی صبر کن…"
+        if (androidRecognitionActive || voiceCaptureActive.get()) {
+            status.text = "در حال شنیدن یا تبدیل گفتار هستم؛ کمی صبر کن…"
             return
         }
+        // Prefer Android's Persian speech service for a fast response. Whisper remains the offline fallback.
+        if (SpeechRecognizer.isRecognitionAvailable(this)) {
+            startAndroidSpeechRecognition()
+        } else {
+            startWhisperFallback()
+        }
+    }
+
+    private fun startAndroidSpeechRecognition() {
+        try {
+            speechRecognizer?.destroy()
+            val recognizer = SpeechRecognizer.createSpeechRecognizer(this)
+            speechRecognizer = recognizer
+            androidRecognitionActive = true
+            setJarvisMode(JarvisOrbView.Mode.LISTENING)
+            status.text = "در حال گوش‌دادن؛ فارسی صحبت کن…"
+            recognizer.setRecognitionListener(object : RecognitionListener {
+                override fun onReadyForSpeech(params: Bundle?) {
+                    runOnUiThread { if (androidRecognitionActive) status.text = "JARVIS گوش می‌دهد؛ صحبت کن…" }
+                }
+                override fun onBeginningOfSpeech() {
+                    runOnUiThread { if (androidRecognitionActive) status.text = "صدایت دریافت شد…" }
+                }
+                override fun onRmsChanged(rmsdB: Float) {
+                    val level = ((rmsdB + 2f) / 14f).coerceIn(0f, 1f)
+                    runOnUiThread { if (androidRecognitionActive && ::orbView.isInitialized) orbView.setAudioLevel(level) }
+                }
+                override fun onBufferReceived(buffer: ByteArray?) {}
+                override fun onEndOfSpeech() {
+                    runOnUiThread {
+                        if (androidRecognitionActive) {
+                            setJarvisMode(JarvisOrbView.Mode.THINKING)
+                            status.text = "در حال تبدیل گفتار فارسی به متن…"
+                        }
+                    }
+                }
+                override fun onError(error: Int) {
+                    runOnUiThread {
+                        if (!androidRecognitionActive || isFinishing) return@runOnUiThread
+                        androidRecognitionActive = false
+                        destroySpeechRecognizer()
+                        status.text = "سرویس گفتار اندروید پاسخ نداد؛ تشخیص آفلاین را امتحان می‌کنم…"
+                        startWhisperFallback()
+                    }
+                }
+                override fun onResults(results: Bundle?) {
+                    runOnUiThread {
+                        if (!androidRecognitionActive || isFinishing) return@runOnUiThread
+                        val text = results?.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION)
+                            ?.firstOrNull()?.trim().orEmpty()
+                        androidRecognitionActive = false
+                        destroySpeechRecognizer()
+                        if (text.length >= 2) {
+                            if (::orbView.isInitialized) orbView.setAudioLevel(0f)
+                            addLog("شما", text)
+                            addConversationMessage("user", text)
+                            handleCommand(text)
+                        } else {
+                            status.text = "متنی از گفتار دریافت نشد؛ تشخیص آفلاین را امتحان می‌کنم…"
+                            startWhisperFallback()
+                        }
+                    }
+                }
+                override fun onPartialResults(partialResults: Bundle?) {}
+                override fun onEvent(eventType: Int, params: Bundle?) {}
+            })
+            val intent = Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH).apply {
+                putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM)
+                putExtra(RecognizerIntent.EXTRA_LANGUAGE, "fa-IR")
+                putExtra(RecognizerIntent.EXTRA_LANGUAGE_PREFERENCE, "fa-IR")
+                putExtra(RecognizerIntent.EXTRA_ONLY_RETURN_LANGUAGE_PREFERENCE, true)
+                putExtra(RecognizerIntent.EXTRA_PARTIAL_RESULTS, true)
+                putExtra(RecognizerIntent.EXTRA_MAX_RESULTS, 1)
+                putExtra(RecognizerIntent.EXTRA_PREFER_OFFLINE, false)
+            }
+            recognizer.startListening(intent)
+        } catch (e: Exception) {
+            androidRecognitionActive = false
+            destroySpeechRecognizer()
+            startWhisperFallback()
+        }
+    }
+
+    private fun destroySpeechRecognizer() {
+        try { speechRecognizer?.cancel() } catch (_: Exception) {}
+        try { speechRecognizer?.destroy() } catch (_: Exception) {}
+        speechRecognizer = null
+        if (::orbView.isInitialized) orbView.setAudioLevel(0f)
+    }
+
+    private fun startWhisperFallback() {
+        if (voiceCaptureActive.get()) return
         if (!WhisperEngine.isAvailable()) {
-            reply("موتور تشخیص گفتار در این نسخه فعال نیست.")
+            reply("سرویس گفتار اندروید در دسترس نیست و موتور آفلاین Whisper هم فعال نیست.")
             return
         }
         if (!whisper.isLoaded()) {
             if (whisperLoadActive.get()) {
-                status.text = "مدل فارسی در حال آماده‌سازی است…"
+                status.text = "مدل آفلاین فارسی هنوز در حال بارگذاری است…"
                 return
             }
             if (whisperModelFile.isFile && whisperModelFile.length() > 15000000L) {
@@ -1731,7 +1846,10 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
         }
         if (::orbView.isInitialized) setJarvisMode(JarvisOrbView.Mode.SPEAKING)
         val result = try {
-            tts.speak(message, TextToSpeech.QUEUE_FLUSH, android.os.Bundle(), "jarvis_${System.nanoTime()}")
+            tts.speak(message, TextToSpeech.QUEUE_FLUSH, android.os.Bundle().apply {
+                putFloat(TextToSpeech.Engine.KEY_PARAM_VOLUME, 1.0f)
+                putInt(TextToSpeech.Engine.KEY_PARAM_STREAM, AudioManager.STREAM_MUSIC)
+            }, "jarvis_${System.nanoTime()}")
         } catch (e: Exception) { TextToSpeech.ERROR }
         if (result == TextToSpeech.ERROR) {
             if (::orbView.isInitialized) setJarvisMode(JarvisOrbView.Mode.IDLE)
@@ -1765,7 +1883,7 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
         if (code == TextToSpeech.SUCCESS) {
             try {
                 tts.setAudioAttributes(android.media.AudioAttributes.Builder()
-                    .setUsage(android.media.AudioAttributes.USAGE_ASSISTANT)
+                    .setUsage(android.media.AudioAttributes.USAGE_MEDIA)
                     .setContentType(android.media.AudioAttributes.CONTENT_TYPE_SPEECH)
                     .build())
                 tts.setSpeechRate(0.92f)
@@ -1803,7 +1921,7 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
             })
             var result = tts.setLanguage(Locale.forLanguageTag("fa-IR"))
             if (result < TextToSpeech.LANG_AVAILABLE) result = tts.setLanguage(Locale("fa"))
-            val persianVoices = try { tts.voices?.filter { it.locale.language == "fa" }.orEmpty() } catch (_: Exception) { emptyList() }
+            val persianVoices = try { tts.voices?.filter { it.locale.language == "fa" && !it.isNetworkConnectionRequired }.orEmpty() } catch (_: Exception) { emptyList() }
             val savedVoice = prefs.getString("tts_voice", "")
             val selectedPersianVoice = persianVoices.firstOrNull { it.name == savedVoice }
                 ?: persianVoices.maxByOrNull { it.quality }
@@ -1832,6 +1950,8 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
             try { unregisterReceiver(wakeDetectedReceiver) } catch (_: Exception) {}
             wakeReceiverRegistered = false
         }
+        androidRecognitionActive = false
+        destroySpeechRecognizer()
         if (::tts.isInitialized) { tts.stop(); tts.shutdown() }
         // Queue native cleanup behind any active inference to avoid freeing the model mid-generation.
         try {
