@@ -114,7 +114,9 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
             window.isNavigationBarContrastEnforced = false
             window.isStatusBarContrastEnforced = false
         }
-        window.decorView.systemUiVisibility = View.SYSTEM_UI_FLAG_LAYOUT_STABLE or View.SYSTEM_UI_FLAG_LAYOUT_FULLSCREEN
+        window.decorView.systemUiVisibility = View.SYSTEM_UI_FLAG_LAYOUT_STABLE
+        // Let Android resize the activity when the keyboard opens so chat and composer stay visible.
+        window.setSoftInputMode(android.view.WindowManager.LayoutParams.SOFT_INPUT_ADJUST_RESIZE)
         val root = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             setPadding(dp(18), dp(38), dp(18), dp(12))
@@ -189,6 +191,14 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
             textDirection = View.TEXT_DIRECTION_FIRST_STRONG_RTL
         }
         composer.addView(input, LinearLayout.LayoutParams(0, -2, 1f))
+        input.setOnFocusChangeListener { _, hasFocus ->
+            if (hasFocus) {
+                chatShell.visibility = View.VISIBLE
+                composer.visibility = View.VISIBLE
+                chatToggle.text = "بستن چت"
+                chatScroll.post { chatScroll.fullScroll(View.FOCUS_DOWN) }
+            }
+        }
         input.setOnEditorActionListener { _, actionId, event ->
             val sendByIme = actionId == android.view.inputmethod.EditorInfo.IME_ACTION_SEND ||
                 (event?.keyCode == android.view.KeyEvent.KEYCODE_ENTER && event.action == android.view.KeyEvent.ACTION_DOWN)
@@ -311,8 +321,13 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
     }
 
     private fun addLog(who: String, message: String) {
+        val wasNearBottom = if (::chatScroll.isInitialized) {
+            val child = chatScroll.getChildAt(0)
+            child == null || child.height - (chatScroll.scrollY + chatScroll.height) <= dp(48)
+        } else true
         log.append("\n\n$who: $message")
-        if (::chatScroll.isInitialized) chatScroll.post { chatScroll.fullScroll(View.FOCUS_DOWN) }
+        // Keep the newest message in view unless the user is deliberately reading older messages.
+        if (::chatScroll.isInitialized && wasNearBottom) chatScroll.post { chatScroll.fullScroll(View.FOCUS_DOWN) }
     }
 
     private fun sendTextMessage() {
@@ -1708,10 +1723,19 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
 
     private fun reply(message: String) { status.text = message; addLog("JARVIS", message); speak(message) }
     private fun speak(message: String) {
-        if (!ttsReady) { pendingSpeech = message; return }
-        if (::orbView.isInitialized && ::tts.isInitialized) {
-            setJarvisMode(JarvisOrbView.Mode.SPEAKING)
-            tts.speak(message, TextToSpeech.QUEUE_FLUSH, null, "jarvis_reply")
+        if (!::tts.isInitialized) { pendingSpeech = message; return }
+        if (!ttsReady) {
+            pendingSpeech = message
+            status.text = "در انتظار آماده‌شدن صدای فارسی…"
+            return
+        }
+        if (::orbView.isInitialized) setJarvisMode(JarvisOrbView.Mode.SPEAKING)
+        val result = try {
+            tts.speak(message, TextToSpeech.QUEUE_FLUSH, android.os.Bundle(), "jarvis_${System.nanoTime()}")
+        } catch (e: Exception) { TextToSpeech.ERROR }
+        if (result == TextToSpeech.ERROR) {
+            if (::orbView.isInitialized) setJarvisMode(JarvisOrbView.Mode.IDLE)
+            status.text = "پخش صدا ناموفق بود؛ موتور و صدای فارسی گوشی را بررسی کن."
         }
     }
 
@@ -1739,6 +1763,14 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
 
     override fun onInit(code: Int) {
         if (code == TextToSpeech.SUCCESS) {
+            try {
+                tts.setAudioAttributes(android.media.AudioAttributes.Builder()
+                    .setUsage(android.media.AudioAttributes.USAGE_ASSISTANT)
+                    .setContentType(android.media.AudioAttributes.CONTENT_TYPE_SPEECH)
+                    .build())
+                tts.setSpeechRate(0.92f)
+                tts.setPitch(1.0f)
+            } catch (_: Exception) { }
             tts.setOnUtteranceProgressListener(object : UtteranceProgressListener() {
                 override fun onStart(utteranceId: String?) {
                     runOnUiThread { if (::orbView.isInitialized) { setJarvisMode(JarvisOrbView.Mode.SPEAKING); orbView.setAudioLevel(0.15f) } }
@@ -1750,7 +1782,13 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
                     }
                 }
                 override fun onError(utteranceId: String?) {
-                    runOnUiThread { if (::orbView.isInitialized) { orbView.setAudioLevel(0f); setJarvisMode(JarvisOrbView.Mode.IDLE) } }
+                    runOnUiThread {
+                        if (::orbView.isInitialized) { orbView.setAudioLevel(0f); setJarvisMode(JarvisOrbView.Mode.IDLE) }
+                        status.text = "موتور گفتار نتوانست صدا را پخش کند؛ صدای فارسی گوشی را بررسی کن."
+                    }
+                }
+                override fun onError(utteranceId: String?, errorCode: Int) {
+                    onError(utteranceId)
                 }
                 override fun onAudioAvailable(utteranceId: String?, audio: ByteArray?) {
                     if (audio == null || audio.size < 2) return
@@ -1763,8 +1801,9 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
                     runOnUiThread { if (::orbView.isInitialized) orbView.setAudioLevel(level) }
                 }
             })
-            val result = tts.setLanguage(Locale("fa", "IR"))
-            val persianVoices = tts.voices?.filter { it.locale.language == "fa" }.orEmpty()
+            var result = tts.setLanguage(Locale.forLanguageTag("fa-IR"))
+            if (result < TextToSpeech.LANG_AVAILABLE) result = tts.setLanguage(Locale("fa"))
+            val persianVoices = try { tts.voices?.filter { it.locale.language == "fa" }.orEmpty() } catch (_: Exception) { emptyList() }
             val savedVoice = prefs.getString("tts_voice", "")
             val selectedPersianVoice = persianVoices.firstOrNull { it.name == savedVoice }
                 ?: persianVoices.maxByOrNull { it.quality }
@@ -1773,11 +1812,14 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
             // support fa-IR through setLanguage while exposing an empty voices list.
             ttsReady = result >= TextToSpeech.LANG_AVAILABLE
             if (!ttsReady) {
-                status.text = "صدای فارسی در موتور گفتار گوشی موجود نیست؛ از تنظیمات، داده گفتار فارسی را نصب کن."
-            } else if (persianVoices.isEmpty()) {
-                status.text = "موتور گفتار آماده است؛ اگر خروجی فارسی پخش نشد، صدای فارسی را از تنظیمات گوشی نصب کن."
+                status.text = "صدای فارسی روی موتور گفتار نصب یا پشتیبانی نمی‌شود؛ از تنظیمات، داده گفتار فارسی را نصب کن."
+            } else {
+                status.text = "صدای فارسی JARVIS آماده است."
+                pendingSpeech?.let { queued -> pendingSpeech = null; speak(queued) }
             }
-            if (ttsReady) pendingSpeech?.let { queued -> pendingSpeech = null; speak(queued) }
+        } else {
+            ttsReady = false
+            status.text = "موتور تبدیل متن به گفتار گوشی راه‌اندازی نشد؛ موتور گفتار را در تنظیمات فعال کن."
         }
     }
 
