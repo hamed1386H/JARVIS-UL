@@ -2157,6 +2157,7 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
             if (cloudTts.isConfigured()) { speakCloud(message); return }
             pendingSpeech = message
             if (::status.isInitialized) status.text = "صدای فارسی نصب نیست؛ از تنظیمات، صدای فارسی آنلاین را فعال کن."
+            finishSpeechTurn()
             return
         }
         if (::orbView.isInitialized) setJarvisMode(JarvisOrbView.Mode.SPEAKING)
@@ -2175,6 +2176,7 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
             else {
                 if (::orbView.isInitialized) setJarvisMode(JarvisOrbView.Mode.IDLE)
                 status.text = "پخش صدا ناموفق بود؛ موتور گفتار گوشی را بررسی کن یا صدای فارسی آنلاین را تنظیم کن."
+                finishSpeechTurn()
             }
         }
     }
