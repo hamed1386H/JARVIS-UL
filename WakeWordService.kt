@@ -330,15 +330,9 @@ class WakeWordService : Service() {
         val match = matches.first()
         return try {
             if (!isSms) {
-                if (android.os.Build.VERSION.SDK_INT >= 28) {
-                    val telecom = getSystemService(TelecomManager::class.java)
-                        ?: throw IllegalStateException("سرویس تماس گوشی در دسترس نیست")
-                    telecom.placeCall(Uri.fromParts("tel", match.number, null), android.os.Bundle())
-                } else {
-                    val call = Intent(Intent.ACTION_CALL, Uri.parse("tel:" + Uri.encode(match.number)))
-                        .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-                    startActivity(call)
-                }
+                val call = Intent(Intent.ACTION_CALL, Uri.fromParts("tel", match.number, null))
+                    .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                startActivity(call)
                 "درخواست تماس با " + match.name + " به سرویس تماس گوشی سپرده شد."
             } else {
                 val sms = if (android.os.Build.VERSION.SDK_INT >= 31) {
