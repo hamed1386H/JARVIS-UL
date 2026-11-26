@@ -770,7 +770,7 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
             return
         }
         if (androidRecognitionActive || voiceCaptureActive.get()) {
-            status.text = "در حال شنیدن یا تبدیل گفتار هستم؛ کمی صبر کن…"
+            if (!voiceSessionActive) status.text = "در حال شنیدن یا تبدیل گفتار هستم؛ کمی صبر کن…"
             return
         }
         // Prefer Android's Persian speech service for a fast response. Whisper remains the offline fallback.
@@ -804,13 +804,13 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
             speechRecognizer = recognizer
             androidRecognitionActive = true
             setJarvisMode(JarvisOrbView.Mode.LISTENING)
-            status.text = "در حال گوش‌دادن؛ فارسی صحبت کن…"
+            if (!voiceSessionActive) status.text = "در حال گوش‌دادن؛ فارسی صحبت کن…"
             recognizer.setRecognitionListener(object : RecognitionListener {
                 override fun onReadyForSpeech(params: Bundle?) {
-                    runOnUiThread { if (androidRecognitionActive) status.text = "JARVIS گوش می‌دهد؛ صحبت کن…" }
+                    runOnUiThread { if (androidRecognitionActive && !voiceSessionActive) status.text = "JARVIS گوش می‌دهد؛ صحبت کن…" }
                 }
                 override fun onBeginningOfSpeech() {
-                    runOnUiThread { if (androidRecognitionActive) status.text = "صدایت دریافت شد…" }
+                    runOnUiThread { if (androidRecognitionActive && !voiceSessionActive) status.text = "صدایت دریافت شد…" }
                 }
                 override fun onRmsChanged(rmsdB: Float) {
                     val level = ((rmsdB + 2f) / 14f).coerceIn(0f, 1f)
@@ -830,7 +830,7 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
                         if (!androidRecognitionActive || isFinishing) return@runOnUiThread
                         androidRecognitionActive = false
                         destroySpeechRecognizer()
-                        status.text = "سرویس گفتار اندروید پاسخ نداد؛ تشخیص آفلاین را امتحان می‌کنم…"
+                        if (!voiceSessionActive) status.text = "سرویس گفتار اندروید پاسخ نداد؛ تشخیص آفلاین را امتحان می‌کنم…"
                         startWhisperFallback()
                     }
                 }
@@ -849,7 +849,7 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
                             }
                             handleCommand(text)
                         } else {
-                            status.text = "متنی از گفتار دریافت نشد؛ تشخیص آفلاین را امتحان می‌کنم…"
+                            if (!voiceSessionActive) status.text = "متنی از گفتار دریافت نشد؛ تشخیص آفلاین را امتحان می‌کنم…"
                             startWhisperFallback()
                         }
                     }
