@@ -40,7 +40,8 @@ import java.util.Locale
 import java.util.concurrent.Executors
 import kotlin.math.roundToInt
 
-// JARVIS 1.4.4: voice settings access and resilient Persian speech handling.\nclass MainActivity : Activity(), TextToSpeech.OnInitListener {
+// JARVIS 1.4.4: voice settings access and resilient Persian speech handling.
+class MainActivity : Activity(), TextToSpeech.OnInitListener {
     private lateinit var status: TextView
     private lateinit var orbView: JarvisOrbView
     private lateinit var dynamicIsland: TextView
@@ -1510,7 +1511,12 @@ import kotlin.math.roundToInt
             reply("در خدمتم")
             return
         }
-        if (q.contains("تنظیمات جارویس") || q.contains("تنظیمات خودت") || q.contains("تنظیمات داخلی") || q == "تنظیمات دستیار") {\n            openJarvisSettingsSafely()\n            reply("مرکز تنظیمات جارویس باز شد.")\n            return\n        }\n        val googleQuery = extractGoogleSearchQuery(raw)
+        if (q.contains("تنظیمات جارویس") || q.contains("تنظیمات خودت") || q.contains("تنظیمات داخلی") || q == "تنظیمات دستیار") {
+            openJarvisSettingsSafely()
+            reply("مرکز تنظیمات جارویس باز شد.")
+            return
+        }
+        val googleQuery = extractGoogleSearchQuery(raw)
         if (!googleQuery.isNullOrBlank()) { openGoogleSearch(googleQuery); return }
         if (q.contains("هواشناسی") || q.contains("آب و هوا") || q.contains("اب و هوا") || q.contains("وضعیت هوا")) {
             val place = Regex("""(?:در|برای|شهر)\s+(.+?)(?:\s+(?:رو|را)?\s*(?:چک کن|بررسی کن))?$""").find(q)?.groupValues?.get(1)?.trim().orEmpty()
