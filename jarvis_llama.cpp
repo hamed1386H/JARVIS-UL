@@ -18,10 +18,72 @@ struct JarvisModel {
 
 static std::once_flag backend_once;
 static std::string jstringToString(JNIEnv * env, jstring value) {
-    const char * chars = env->GetStringUTFChars(value, nullptr);
-    std::string result(chars ? chars : "");
-    if (chars) env->ReleaseStringUTFChars(value, chars);
-    return result;
+    if (!value) return {};
+    const jsize length = env->GetStringLength(value);
+    const jchar * chars = env->GetStringChars(value, nullptr);
+    if (!chars) return {};
+    std::string out;
+    out.reserve(static_cast<size_t>(length) * 3);
+    for (jsize i = 0; i < length; ++i) {
+        uint32_t cp = chars[i];
+        if (cp >= 0xD800 && cp <= 0xDBFF && i + 1 < length) {
+            const uint32_t low = chars[i + 1];
+            if (low >= 0xDC00 && low <= 0xDFFF) {
+                cp = 0x10000 + ((cp - 0xD800) << 10) + (low - 0xDC00);
+                ++i;
+            } else cp = 0xFFFD;
+        } else if (cp >= 0xDC00 && cp <= 0xDFFF) cp = 0xFFFD;
+        if (cp <= 0x7F) out.push_back(static_cast<char>(cp));
+        else if (cp <= 0x7FF) {
+            out.push_back(static_cast<char>(0xC0 | (cp >> 6)));
+            out.push_back(static_cast<char>(0x80 | (cp & 0x3F)));
+        } else if (cp <= 0xFFFF) {
+            out.push_back(static_cast<char>(0xE0 | (cp >> 12)));
+            out.push_back(static_cast<char>(0x80 | ((cp >> 6) & 0x3F)));
+            out.push_back(static_cast<char>(0x80 | (cp & 0x3F)));
+        } else {
+            out.push_back(static_cast<char>(0xF0 | (cp >> 18)));
+            out.push_back(static_cast<char>(0x80 | ((cp >> 12) & 0x3F)));
+            out.push_back(static_cast<char>(0x80 | ((cp >> 6) & 0x3F)));
+            out.push_back(static_cast<char>(0x80 | (cp & 0x3F)));
+        }
+    }
+    env->ReleaseStringChars(value, chars);
+    return out;
+}
+
+static jstring stringToJString(JNIEnv * env, const std::string & value) {
+    std::vector<jchar> out;
+    out.reserve(value.size());
+    const auto * bytes = reinterpret_cast<const unsigned char *>(value.data());
+    size_t i = 0;
+    while (i < value.size()) {
+        uint32_t cp = 0xFFFD;
+        const unsigned char c = bytes[i++];
+        if (c < 0x80) cp = c;
+        else if ((c & 0xE0) == 0xC0 && i < value.size()) {
+            const unsigned char c1 = bytes[i];
+            if ((c1 & 0xC0) == 0x80) { cp = ((c & 0x1F) << 6) | (c1 & 0x3F); ++i; }
+        } else if ((c & 0xF0) == 0xE0 && i + 1 < value.size()) {
+            const unsigned char c1 = bytes[i], c2 = bytes[i + 1];
+            if ((c1 & 0xC0) == 0x80 && (c2 & 0xC0) == 0x80) {
+                cp = ((c & 0x0F) << 12) | ((c1 & 0x3F) << 6) | (c2 & 0x3F); i += 2;
+            }
+        } else if ((c & 0xF8) == 0xF0 && i + 2 < value.size()) {
+            const unsigned char c1 = bytes[i], c2 = bytes[i + 1], c3 = bytes[i + 2];
+            if ((c1 & 0xC0) == 0x80 && (c2 & 0xC0) == 0x80 && (c3 & 0xC0) == 0x80) {
+                cp = ((c & 0x07) << 18) | ((c1 & 0x3F) << 12) | ((c2 & 0x3F) << 6) | (c3 & 0x3F); i += 3;
+            }
+        }
+        if (cp > 0x10FFFF || (cp >= 0xD800 && cp <= 0xDFFF)) cp = 0xFFFD;
+        if (cp <= 0xFFFF) out.push_back(static_cast<jchar>(cp));
+        else {
+            cp -= 0x10000;
+            out.push_back(static_cast<jchar>(0xD800 + (cp >> 10)));
+            out.push_back(static_cast<jchar>(0xDC00 + (cp & 0x3FF)));
+        }
+    }
+    return env->NewString(out.data(), static_cast<jsize>(out.size()));
 }
 
 extern "C" JNIEXPORT jlong JNICALL
@@ -66,7 +128,7 @@ extern "C" JNIEXPORT jstring JNICALL
 Java_com_chtai_assistant_LocalAiEngine_nativeGenerate(JNIEnv * env, jobject,
                                                        jlong handle, jstring jprompt, jint maxTokens) {
     auto * state = reinterpret_cast<JarvisModel *>(handle);
-    if (!state || !state->context || !state->vocab) return env->NewStringUTF("موتور هوش مصنوعی آماده نیست.");
+    if (!state || !state->context || !state->vocab) return stringToJString(env, "موتور هوش مصنوعی آماده نیست.");
     std::lock_guard<std::mutex> lock(state->mutex);
     const std::string prompt = jstringToString(env, jprompt);
     llama_memory_clear(llama_get_memory(state->context), true);
@@ -80,7 +142,7 @@ Java_com_chtai_assistant_LocalAiEngine_nativeGenerate(JNIEnv * env, jobject,
         tokenCount = llama_tokenize(state->vocab, prompt.c_str(), static_cast<int32_t>(prompt.size()),
             tokens.data(), static_cast<int32_t>(tokens.size()), true, true);
     }
-    if (tokenCount <= 0) return env->NewStringUTF("متن ورودی قابل پردازش نیست.");
+    if (tokenCount <= 0) return stringToJString(env, "متن ورودی قابل پردازش نیست.");
     tokens.resize(static_cast<size_t>(tokenCount));
     // Reserve room for generated tokens. Keep the beginning (system instructions)
     // and the most recent context if the conversation exceeds the context window.
@@ -98,7 +160,7 @@ Java_com_chtai_assistant_LocalAiEngine_nativeGenerate(JNIEnv * env, jobject,
 
     const uint32_t contextLimit = llama_n_ctx(state->context);
     if (tokens.size() + static_cast<size_t>(maxTokens) >= contextLimit) {
-        return env->NewStringUTF("گفتگو برای ظرفیت فعلی مدل طولانی است؛ تاریخچه گفتگو را کوتاه یا پاک کن.");
+        return stringToJString(env, "گفتگو برای ظرفیت فعلی مدل طولانی است؛ تاریخچه گفتگو را کوتاه یا پاک کن.");
     }
     // llama_decode cannot accept more tokens than contextParams.n_batch (128).
     // Split long Persian prompts/history into bounded batches; request logits only
@@ -122,7 +184,7 @@ Java_com_chtai_assistant_LocalAiEngine_nativeGenerate(JNIEnv * env, jobject,
             LOGE("Prompt decode failed at token %zu/%zu (batch size %zu)",
                  offset, tokens.size(), count);
             LOGE("Prompt decode failed with code %d at token %zu/%zu (batch size %zu)", decodeResult, offset, tokens.size(), count);
-            return env->NewStringUTF("مدل نتوانست متن را پردازش کند؛ حافظه آزاد گوشی یا سازگاری فایل مدل را بررسی کن.");
+            return stringToJString(env, "مدل نتوانست متن را پردازش کند؛ حافظه آزاد گوشی یا سازگاری فایل مدل را بررسی کن.");
         }
         offset += count;
     }
@@ -146,7 +208,7 @@ Java_com_chtai_assistant_LocalAiEngine_nativeGenerate(JNIEnv * env, jobject,
         if (llama_decode(state->context, batch) != 0) break;
     }
     if (output.empty()) output = "مدل پاسخی تولید نکرد؛ پیام را کوتاه‌تر بفرست یا مدل را دوباره بارگذاری کن.";
-    return env->NewStringUTF(output.c_str());
+    return stringToJString(env, output);
 }
 
 extern "C" JNIEXPORT void JNICALL
