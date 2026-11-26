@@ -40,6 +40,7 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
     private lateinit var status: TextView
     private lateinit var orbView: JarvisOrbView
     private val voiceCaptureActive = java.util.concurrent.atomic.AtomicBoolean(false)
+    private val whisperLoadActive = java.util.concurrent.atomic.AtomicBoolean(false)
     private lateinit var log: TextView
     private lateinit var chatScroll: ScrollView
     private lateinit var input: EditText
@@ -514,61 +515,151 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
 
     private fun beginListening() {
         if (ContextCompat.checkSelfPermission(this, Manifest.permission.RECORD_AUDIO) != PackageManager.PERMISSION_GRANTED) {
-            ActivityCompat.requestPermissions(this, arrayOf(Manifest.permission.RECORD_AUDIO), requestMic); return
+            ActivityCompat.requestPermissions(this, arrayOf(Manifest.permission.RECORD_AUDIO), requestMic)
+            return
         }
-        if (!WhisperEngine.isAvailable()) { reply("کتابخانه Whisper در این نسخه وجود ندارد."); return }
+        if (voiceCaptureActive.get()) {
+            status.text = "در حال شنیدن؛ کمی صبر کن…"
+            return
+        }
+        if (!WhisperEngine.isAvailable()) {
+            reply("موتور تشخیص گفتار در این نسخه فعال نیست.")
+            return
+        }
         if (!whisper.isLoaded()) {
-            if (whisperModelFile.isFile && whisperModelFile.length() > 50000000L) { loadWhisperModel(whisperModelFile); return }
-            promptWhisperModelDownload(); return
+            if (whisperLoadActive.get()) {
+                status.text = "مدل فارسی در حال آماده‌سازی است…"
+                return
+            }
+            if (whisperModelFile.isFile && whisperModelFile.length() > 50000000L) {
+                loadWhisperModel(whisperModelFile)
+                return
+            }
+            promptWhisperModelDownload()
+            return
         }
         captureAndTranscribe()
     }
 
     private fun captureAndTranscribe() {
         if (!activityVisible || !whisper.isLoaded()) return
-        if (!voiceCaptureActive.compareAndSet(false, true)) return
-        status.text = "JARVIS گوش می‌دهد…"; orbView.setMode(JarvisOrbView.Mode.LISTENING)
-        voiceExecutor.execute {
-            var recorder: AudioRecord? = null
-            try {
-                val rate = 16000
-                val minBuffer = AudioRecord.getMinBufferSize(rate, AudioFormat.CHANNEL_IN_MONO, AudioFormat.ENCODING_PCM_16BIT)
-                check(minBuffer > 0) { "ضبط صدای ۱۶ کیلوهرتز در دسترس نیست." }
-                recorder = AudioRecord(MediaRecorder.AudioSource.MIC, rate, AudioFormat.CHANNEL_IN_MONO, AudioFormat.ENCODING_PCM_16BIT, maxOf(minBuffer * 2, 12800))
-                check(recorder.state == AudioRecord.STATE_INITIALIZED) { "میکروفون آماده نشد." }
-                val chunk = ShortArray(320); val samples = ArrayList<Float>(rate * 12)
-                var started = false; var silence = 0; var elapsed = 0
-                recorder.startRecording()
-                while (elapsed < 15000 && (!started || silence < 850)) {
-                    val n = recorder.read(chunk, 0, chunk.size)
-                    if (n < 0) throw IllegalStateException("خطای خواندن میکروفون: $n")
-                    if (n == 0) continue
-                    var energy = 0.0
-                    for (i in 0 until n) { val v = chunk[i].toFloat() / 32768f; samples.add(v); energy += chunk[i].toDouble() * chunk[i].toDouble() }
-                    val rms = kotlin.math.sqrt(energy / n).toInt()
-                    if (rms > 420) { started = true; silence = 0 } else if (started) silence += n * 1000 / rate
-                    elapsed += n * 1000 / rate
-                    val level = (rms / 5000f).coerceIn(0f, 1f)
-                    runOnUiThread { orbView.setAudioLevel(level) }
+        if (!voiceCaptureActive.compareAndSet(false, true)) {
+            status.text = "در حال پردازش صدای قبلی هستم…"
+            return
+        }
+        status.text = "JARVIS گوش می‌دهد؛ واضح و نزدیک صحبت کن."
+        orbView.setMode(JarvisOrbView.Mode.LISTENING)
+        try {
+            voiceExecutor.execute {
+                var recorder: AudioRecord? = null
+                var recordingStarted = false
+                try {
+                    val rate = 16000
+                    val minBuffer = AudioRecord.getMinBufferSize(
+                        rate, AudioFormat.CHANNEL_IN_MONO, AudioFormat.ENCODING_PCM_16BIT
+                    )
+                    check(minBuffer > 0) { "ضبط صدای ۱۶ کیلوهرتز در دسترس نیست." }
+                    recorder = AudioRecord(
+                        MediaRecorder.AudioSource.VOICE_RECOGNITION,
+                        rate,
+                        AudioFormat.CHANNEL_IN_MONO,
+                        AudioFormat.ENCODING_PCM_16BIT,
+                        maxOf(minBuffer * 2, 12800)
+                    )
+                    check(recorder.state == AudioRecord.STATE_INITIALIZED) { "میکروفون آماده نشد." }
+                    val chunk = ShortArray(320)
+                    val samples = ArrayList<Float>(rate * 10)
+                    var started = false
+                    var silenceMs = 0
+                    var elapsedMs = 0
+                    recorder.startRecording()
+                    recordingStarted = true
+                    while (elapsedMs < 12000 && (!started || silenceMs < 900)) {
+                        val n = recorder.read(chunk, 0, chunk.size)
+                        if (n == AudioRecord.ERROR_INVALID_OPERATION || n == AudioRecord.ERROR_BAD_VALUE ||
+                            n == AudioRecord.ERROR_DEAD_OBJECT) {
+                            throw IllegalStateException("ارتباط میکروفون قطع شد؛ دوباره تلاش کن.")
+                        }
+                        if (n <= 0) continue
+                        var energy = 0.0
+                        for (i in 0 until n) {
+                            val sample = chunk[i].toFloat() / 32768f
+                            samples.add(sample)
+                            energy += chunk[i].toDouble() * chunk[i].toDouble()
+                        }
+                        val rms = kotlin.math.sqrt(energy / n).toInt()
+                        // Higher threshold rejects room noise that Whisper otherwise hallucinates as words.
+                        if (rms > 650) {
+                            started = true
+                            silenceMs = 0
+                        } else if (started) {
+                            silenceMs += n * 1000 / rate
+                        }
+                        elapsedMs += n * 1000 / rate
+                        val level = (rms / 5000f).coerceIn(0f, 1f)
+                        runOnUiThread { if (::orbView.isInitialized) orbView.setAudioLevel(level) }
+                    }
+                    if (!started) throw IllegalStateException("صدای واضحی دریافت نشد؛ نزدیک‌تر و بلندتر صحبت کن.")
+                    if (recordingStarted && recorder.recordingState == AudioRecord.RECORDSTATE_RECORDING) {
+                        recorder.stop()
+                        recordingStarted = false
+                    }
+                    val audio = FloatArray(samples.size) { samples[it] }
+                    if (audio.size < rate * 1 / 2) throw IllegalStateException("صدای ضبط‌شده کوتاه بود؛ دوباره بگو.")
+                    runOnUiThread {
+                        if (::orbView.isInitialized) {
+                            orbView.setAudioLevel(0f)
+                            orbView.setMode(JarvisOrbView.Mode.THINKING)
+                        }
+                        status.text = "در حال تبدیل صدای فارسی به متن…"
+                    }
+                    val words = whisper.transcribe(audio).trim()
+                    runOnUiThread {
+                        if (!activityVisible) return@runOnUiThread
+                        if (words.isNotBlank() && words.length >= 2) {
+                            addLog("شما", words)
+                            handleCommand(words)
+                        } else {
+                            status.text = "گفتار واضحی تشخیص داده نشد؛ دوباره امتحان کن."
+                            orbView.setMode(JarvisOrbView.Mode.IDLE)
+                        }
+                    }
+                } catch (e: Exception) {
+                    runOnUiThread {
+                        if (activityVisible) {
+                            status.text = "تشخیص صدا ناموفق بود."
+                            reply("مشکل میکروفون یا تبدیل گفتار: " + (e.message ?: "خطای ناشناخته"))
+                        }
+                    }
+                } finally {
+                    try {
+                        if (recordingStarted && recorder?.recordingState == AudioRecord.RECORDSTATE_RECORDING) {
+                            recorder.stop()
+                        }
+                    } catch (_: Exception) { }
+                    try { recorder?.release() } catch (_: Exception) { }
+                    voiceCaptureActive.set(false)
+                    runOnUiThread {
+                        if (::orbView.isInitialized) {
+                            orbView.setAudioLevel(0f)
+                            if (orbView.mode != JarvisOrbView.Mode.SPEAKING &&
+                                orbView.mode != JarvisOrbView.Mode.THINKING) {
+                                orbView.setMode(JarvisOrbView.Mode.IDLE)
+                            }
+                        }
+                    }
                 }
-                if (!started) throw IllegalStateException("صدایی دریافت نشد؛ نزدیک‌تر به میکروفون صحبت کن و دوباره تلاش کن.")
-                recorder.stop()
-                val audio = FloatArray(samples.size) { samples[it] }
-                runOnUiThread { orbView.setAudioLevel(0f); orbView.setMode(JarvisOrbView.Mode.THINKING); status.text = "در حال تبدیل صدای فارسی به متن…" }
-                if (audio.size < rate / 2) { runOnUiThread { status.text = "صدایی دریافت نشد؛ دوباره صحبت کن"; orbView.setMode(JarvisOrbView.Mode.IDLE) }; return@execute }
-                val words = whisper.transcribe(audio)
-                runOnUiThread { if (words.isNotBlank()) { addLog("شما", words); handleCommand(words) } else { status.text = "متوجه صحبتت نشدم؛ دوباره بگو"; orbView.setMode(JarvisOrbView.Mode.IDLE) } }
-            } catch (e: Exception) { runOnUiThread { reply("تشخیص صدای Whisper ناموفق بود: " + (e.message ?: "خطای ناشناخته")) } }
-            finally {
-                try { recorder?.release() } catch (_: Exception) {}
-                voiceCaptureActive.set(false)
-                runOnUiThread { if (::orbView.isInitialized) orbView.setAudioLevel(0f) }
             }
+        } catch (e: Exception) {
+            voiceCaptureActive.set(false)
+            status.text = "شروع میکروفون ممکن نشد؛ دوباره تلاش کن."
+            reply("شروع ضبط صدا ناموفق بود: " + (e.message ?: "خطای ناشناخته"))
         }
     }
+
     private fun autoLoadWhisperModel() {
         if (whisperModelFile.isFile && whisperModelFile.length() > 50000000L && WhisperEngine.isAvailable()) {
-            voiceExecutor.execute { try { whisper.load(whisperModelFile.absolutePath) } catch (_: Exception) { } }
+            loadWhisperModel(whisperModelFile)
         }
     }
 
@@ -808,13 +899,28 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
     }
 
     private fun loadWhisperModel(file: java.io.File) {
+        if (!whisperLoadActive.compareAndSet(false, true)) {
+            status.text = "مدل فارسی در حال آماده‌سازی است…"
+            return
+        }
         status.text = "در حال بارگذاری مدل فارسی Whisper…"
-        voiceExecutor.execute {
-            try {
-                whisper.load(file.absolutePath)
-                runOnUiThread { status.text = "Whisper فارسی آماده است."; if (activityVisible) captureAndTranscribe() }
-            } catch (e: Exception) { runOnUiThread { reply("بارگذاری مدل Whisper ناموفق بود: " + (e.message ?: "خطا")) }
+        try {
+            voiceExecutor.execute {
+                try {
+                    whisper.load(file.absolutePath)
+                    runOnUiThread {
+                        status.text = "مدل تشخیص فارسی آماده است."
+                        if (activityVisible) captureAndTranscribe()
+                    }
+                } catch (e: Exception) {
+                    runOnUiThread { reply("بارگذاری مدل گفتار ناموفق بود: " + (e.message ?: "خطا")) }
+                } finally {
+                    whisperLoadActive.set(false)
+                }
             }
+        } catch (e: Exception) {
+            whisperLoadActive.set(false)
+            reply("صف پردازش صوتی آماده نیست؛ برنامه را دوباره باز کن.")
         }
     }
 
@@ -1678,13 +1784,14 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
                 }
             })
             val result = tts.setLanguage(Locale("fa", "IR"))
-            ttsReady = result >= TextToSpeech.LANG_AVAILABLE
+            val persianVoices = tts.voices?.filter { it.locale.language == "fa" }.orEmpty()
             val savedVoice = prefs.getString("tts_voice", "")
-            if (!savedVoice.isNullOrBlank()) tts.voices?.firstOrNull { it.name == savedVoice }?.let { tts.setVoice(it) }
+            val selectedPersianVoice = persianVoices.firstOrNull { it.name == savedVoice }
+                ?: persianVoices.maxByOrNull { it.quality }
+            if (selectedPersianVoice != null) tts.setVoice(selectedPersianVoice)
+            ttsReady = result >= TextToSpeech.LANG_AVAILABLE && selectedPersianVoice != null
             if (!ttsReady) {
-                val fallback = tts.setLanguage(Locale.getDefault())
-                ttsReady = fallback >= TextToSpeech.LANG_AVAILABLE
-                status.text = if (ttsReady) "صدای فارسی نصب نیست؛ زبان پیش‌فرض استفاده می‌شود" else "موتور گفتار نصب یا آماده نیست؛ پاسخ متنی فعال است"
+                status.text = "صدای فارسی روی گوشی نصب نیست؛ از تنظیمات تبدیل متن به گفتار، صدای فارسی را نصب کن."
             }
             if (ttsReady) pendingSpeech?.let { queued -> pendingSpeech = null; speak(queued) }
         }
