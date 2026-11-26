@@ -2219,7 +2219,7 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
                         val localPrompt = agentCore.buildLocalPrompt(prompt, conversation)
                         localAi.generate(localPrompt, 96).trim()
                     }
-                    val cleaned = answer.replace(Regex("<think>[\s\\S]*?</think>"), "").trim()
+                    val cleaned = answer.replace(Regex("<think>[\\s\\S]*?</think>"), "").trim()
                     if (cleaned.isBlank()) throw IllegalStateException("پاسخ دستیار خالی بود.")
                     runOnUiThread {
                         if (isFinishing || requestId != aiRequestGeneration.get()) return@runOnUiThread
