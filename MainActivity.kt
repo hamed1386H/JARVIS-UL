@@ -742,6 +742,7 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
             setBackgroundColor(Color.rgb(3, 7, 20))
         }
         val orb = JarvisOrbView(this).also { voiceOrb = it }
+        orb.setOnClickListener { toggleVoiceConversation() }
         panel.addView(orb, LinearLayout.LayoutParams(-1, dp(300)))
         panel.addView(TextView(this).apply {
             text = "مکالمه زنده فعال است"
