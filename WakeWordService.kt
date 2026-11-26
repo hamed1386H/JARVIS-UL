@@ -18,7 +18,7 @@ class WakeWordService : Service() {
     private val running = AtomicBoolean(false)
     private var worker: Thread? = null
     private var wakeLock: android.os.PowerManager.WakeLock? = null
-    private val channelId = "cht_wake_service"
+    private val channelId = "cht_wake_service_v2"
     private val notificationId = 7701
 
     override fun onCreate() {
@@ -35,13 +35,13 @@ class WakeWordService : Service() {
 
     private fun createChannel() {
         if (Build.VERSION.SDK_INT >= 26) {
-            val channel = NotificationChannel(channelId, "گوش‌به‌زنگ JARVIS", NotificationManager.IMPORTANCE_LOW)
+            val channel = NotificationChannel(channelId, "گوش‌به‌زنگ JARVIS", NotificationManager.IMPORTANCE_HIGH).apply { lockscreenVisibility = Notification.VISIBILITY_PUBLIC }
             getSystemService(NotificationManager::class.java).createNotificationChannel(channel)
         }
     }
 
-    private fun buildNotification(message: String): Notification {
-        val open = Intent(this, MainActivity::class.java).apply { flags = Intent.FLAG_ACTIVITY_SINGLE_TOP or Intent.FLAG_ACTIVITY_CLEAR_TOP }
+    private fun buildNotification(message: String, wakeDetected: Boolean = false): Notification {
+        val open = Intent(this, MainActivity::class.java).apply {\n            flags = Intent.FLAG_ACTIVITY_SINGLE_TOP or Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_NEW_TASK\n            if (wakeDetected) putExtra(MainActivity.EXTRA_WAKE_DETECTED, true)\n        }
         val content = PendingIntent.getActivity(this, 7702, open, PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE)
         val stop = Intent(this, WakeWordService::class.java).setAction(ACTION_STOP)
         val stopPending = PendingIntent.getService(this, 7703, stop, PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE)
@@ -72,7 +72,7 @@ class WakeWordService : Service() {
     }
 
     private fun localWakeLoop() {
-        val model = File(getExternalFilesDir(Environment.DIRECTORY_DOWNLOADS) ?: File(filesDir, "models"), "ggml-base-persian-q8_0.bin")
+        val model = File(getExternalFilesDir(Environment.DIRECTORY_DOWNLOADS) ?: File(filesDir, "models"), "ggml-base.bin")
         if (!model.isFile || model.length() < 50_000_000L) {
             updateNotification("برای گوش‌به‌زنگ آفلاین، ابتدا مدل Whisper را در JARVIS دانلود کن")
             running.set(false)
@@ -90,7 +90,7 @@ class WakeWordService : Service() {
             check(recorder.state == AudioRecord.STATE_INITIALIZED)
             recorder.startRecording()
             updateNotification("گوش‌به‌زنگ آفلاین فعال است؛ بگو جارویس")
-            val chunk = ShortArray(rate * 4)
+            val chunk = ShortArray(rate * 2)
             while (running.get()) {
                 var offset = 0
                 while (offset < chunk.size && running.get()) {
