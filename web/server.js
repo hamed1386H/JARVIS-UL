@@ -29,7 +29,6 @@ db.exec(`
 `);
 const insertMessage = db.prepare("INSERT INTO messages(role, content) VALUES (?, ?)");
 const getHistory = db.prepare("SELECT role, content, created_at FROM messages ORDER BY id DESC LIMIT ?");
-const sessions = new Map();
 
 function safeEqual(a, b) {
   const aa = Buffer.from(String(a));
@@ -43,12 +42,13 @@ function readCookie(req, name) {
 }
 function auth(req, res, next) {
   const token = readCookie(req, "jarvis_session");
-  const expires = sessions.get(token);
-  if (!token || !expires || expires < Date.now()) {
-    if (token) sessions.delete(token);
+  const [expiresText, signature, extra] = token.split(".");
+  const expires = Number(expiresText);
+  const expected = crypto.createHmac("sha256", ACCESS_PASSWORD).update(expiresText || "").digest("hex");
+  if (!ACCESS_PASSWORD || !token || extra !== undefined || !Number.isSafeInteger(expires) ||
+      expires < Date.now() || !signature || !safeEqual(signature, expected)) {
     return res.status(401).json({ error: "برای ورود، رمز دسترسی جارویس را وارد کن." });
   }
-  sessions.set(token, Date.now() + 7 * 24 * 60 * 60 * 1000);
   next();
 }
 const loginLimiter = rateLimit({ windowMs: 15 * 60 * 1000, limit: 10, standardHeaders: "draft-7", legacyHeaders: false });
@@ -60,13 +60,13 @@ app.post("/api/login", loginLimiter, (req, res) => {
   if (!ACCESS_PASSWORD) return res.status(503).json({ error: "سرور هنوز رمز JARVIS_ACCESS_PASSWORD را تنظیم نکرده است." });
   const password = typeof req.body?.password === "string" ? req.body.password : "";
   if (!safeEqual(password, ACCESS_PASSWORD)) return res.status(401).json({ error: "رمز ورود اشتباه است." });
-  const token = crypto.randomBytes(32).toString("hex");
-  sessions.set(token, Date.now() + 7 * 24 * 60 * 60 * 1000);
+  const expires = String(Date.now() + 7 * 24 * 60 * 60 * 1000);
+  const signature = crypto.createHmac("sha256", ACCESS_PASSWORD).update(expires).digest("hex");
+  const token = `${expires}.${signature}`;
   res.setHeader("Set-Cookie", `jarvis_session=${encodeURIComponent(token)}; HttpOnly; Secure; SameSite=Strict; Path=/; Max-Age=604800`);
   res.json({ ok: true });
 });
 app.post("/api/logout", auth, (req, res) => {
-  sessions.delete(readCookie(req, "jarvis_session"));
   res.setHeader("Set-Cookie", "jarvis_session=; HttpOnly; Secure; SameSite=Strict; Path=/; Max-Age=0");
   res.json({ ok: true });
 });
