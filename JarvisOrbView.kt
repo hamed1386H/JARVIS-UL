@@ -1,172 +1,65 @@
 package com.chtai.assistant
 
-import android.animation.ValueAnimator
 import android.content.Context
-import android.graphics.*
+import android.opengl.GLES20
+import android.opengl.GLSurfaceView
+import android.opengl.Matrix
 import android.view.View
-import android.view.animation.AccelerateDecelerateInterpolator
-import kotlin.math.min
+import java.nio.ByteBuffer
+import java.nio.ByteOrder
+import java.nio.FloatBuffer
+import javax.microedition.khronos.egl.EGLConfig
+import javax.microedition.khronos.opengles.GL10
+import kotlin.math.cos
+import kotlin.math.sin
 
-class JarvisOrbView(context: Context) : View(context) {
+class JarvisOrbView(context: Context) : GLSurfaceView(context) {
     enum class Mode { IDLE, LISTENING, THINKING, SPEAKING }
-    private val paint = Paint(Paint.ANTI_ALIAS_FLAG)
-    private var pulse = 0.45f
-    private var rotation = 0f
-    private var mode = Mode.IDLE
-    private var audioLevel = 0f
-    private var animator: ValueAnimator? = null
+    private val scene = OrbRenderer()
+    init { setEGLContextClientVersion(2); setRenderer(scene); renderMode=RENDERMODE_CONTINUOUSLY; keepScreenOn=false; setLayerType(View.LAYER_TYPE_HARDWARE,null) }
+    fun setAudioLevel(level:Float) { scene.energy=level.coerceIn(0f,1f) }
+    fun setMode(next:Mode) { scene.mode=next }
 
-    fun setAudioLevel(level: Float) {
-        audioLevel = level.coerceIn(0f, 1f)
-        invalidate()
-    }
-
-    fun setMode(next: Mode) {
-        mode = next
-        invalidate()
-    }
-
-    override fun onAttachedToWindow() {
-        super.onAttachedToWindow()
-        if (animator?.isRunning == true) return
-        animator = ValueAnimator.ofFloat(0f, 1f).apply {
-            duration = 3200L
-            repeatMode = ValueAnimator.RESTART
-            repeatCount = ValueAnimator.INFINITE
-            interpolator = AccelerateDecelerateInterpolator()
-            addUpdateListener {
-                pulse = it.animatedValue as Float
-                rotation = pulse * 360f
-                invalidate()
-            }
-            start()
+    private class OrbRenderer : Renderer {
+        @Volatile var mode=Mode.IDLE
+        @Volatile var energy=0f
+        private var program=0
+        private var vertices:FloatBuffer?=null
+        private var indices:java.nio.ShortBuffer?=null
+        private var count=0
+        private val projection=FloatArray(16); private val view=FloatArray(16); private val model=FloatArray(16)
+        private val mvp=FloatArray(16); private var position=0; private var matrix=0; private var color=0
+        private var timeLoc=0; private var energyLoc=0; private var modeLoc=0
+        private val start=System.nanoTime()
+        private val vs="""uniform mat4 uMVP; uniform float uTime; uniform float uEnergy; attribute vec3 aPosition; varying vec3 vN; varying vec3 vP; void main(){float pulse=1.0+0.025*sin(uTime*2.0)+uEnergy*0.10; vec3 p=aPosition*pulse; vN=normalize(aPosition); vP=p; gl_Position=uMVP*vec4(p,1.0);}"""
+        private val fs="""precision mediump float; uniform vec4 uColor; uniform float uTime; uniform float uEnergy; uniform float uMode; varying vec3 vN; varying vec3 vP; void main(){vec3 l=normalize(vec3(-0.45,0.65,0.9)); float d=max(dot(normalize(vN),l),0.0); float rim=pow(1.0-max(dot(normalize(vN),vec3(0.0,0.0,1.0)),0.0),2.2); float scan=0.94+0.06*sin(vP.y*35.0+uTime*2.5); vec3 base=uColor.rgb*(0.30+0.78*d)*scan+uColor.rgb*rim*0.65; gl_FragColor=vec4(base+uColor.rgb*(0.08+uEnergy*0.20+(uMode>1.5?0.12:0.0)),1.0);}"""
+        override fun onSurfaceCreated(gl:GL10?,config:EGLConfig?) {
+            GLES20.glClearColor(0.008f,0.012f,0.035f,1f); GLES20.glEnable(GLES20.GL_DEPTH_TEST)
+            program=link(vs,fs); position=GLES20.glGetAttribLocation(program,"aPosition"); matrix=GLES20.glGetUniformLocation(program,"uMVP")
+            color=GLES20.glGetUniformLocation(program,"uColor"); timeLoc=GLES20.glGetUniformLocation(program,"uTime")
+            energyLoc=GLES20.glGetUniformLocation(program,"uEnergy"); modeLoc=GLES20.glGetUniformLocation(program,"uMode")
+            sphere(40,56); Matrix.setLookAtM(view,0,0f,0f,3.35f,0f,0f,0f,0f,1f,0f)
         }
-    }
-
-    override fun onDetachedFromWindow() {
-        animator?.cancel()
-        animator = null
-        super.onDetachedFromWindow()
-    }
-
-    override fun onDraw(canvas: Canvas) {
-        super.onDraw(canvas)
-        val cx = width / 2f
-        val cy = height / 2f
-        val r = min(width, height) * 0.285f
-        if (r <= 0f) return
-
-        val accent = when (mode) {
-            Mode.LISTENING -> Color.rgb(65, 190, 255)
-            Mode.THINKING -> Color.rgb(177, 105, 255)
-            Mode.SPEAKING -> Color.rgb(105, 135, 255)
-            Mode.IDLE -> Color.rgb(145, 105, 255)
+        override fun onSurfaceChanged(gl:GL10?,w:Int,h:Int) { GLES20.glViewport(0,0,w,h); val r=w.toFloat()/h.coerceAtLeast(1); Matrix.frustumM(projection,0,-r,r,-1f,1f,2f,8f) }
+        override fun onDrawFrame(gl:GL10?) {
+            GLES20.glClear(GLES20.GL_COLOR_BUFFER_BIT or GLES20.GL_DEPTH_BUFFER_BIT); if(program==0)return
+            val t=(System.nanoTime()-start)/1_000_000_000f
+            Matrix.setIdentityM(model,0); Matrix.rotateM(model,0,t*13f,0.2f,1f,0.1f)
+            val mv=FloatArray(16); Matrix.multiplyMM(mv,0,view,0,model,0); Matrix.multiplyMM(mvp,0,projection,0,mv,0)
+            val c=when(mode){Mode.LISTENING->floatArrayOf(.12f,.92f,.72f,1f);Mode.THINKING->floatArrayOf(.56f,.40f,1f,1f);Mode.SPEAKING->floatArrayOf(.12f,.70f,1f,1f);Mode.IDLE->floatArrayOf(.18f,.62f,.95f,1f)}
+            GLES20.glUseProgram(program); GLES20.glUniformMatrix4fv(matrix,1,false,mvp,0); GLES20.glUniform4fv(color,1,c,0)
+            GLES20.glUniform1f(timeLoc,t); GLES20.glUniform1f(energyLoc,energy); GLES20.glUniform1f(modeLoc,mode.ordinal.toFloat())
+            vertices?.position(0); GLES20.glEnableVertexAttribArray(position); GLES20.glVertexAttribPointer(position,3,GLES20.GL_FLOAT,false,12,vertices)
+            GLES20.glDrawElements(GLES20.GL_TRIANGLES,count,GLES20.GL_UNSIGNED_SHORT,indices); GLES20.glDisableVertexAttribArray(position)
         }
-        val energy = (audioLevel * 0.7f) + if (mode == Mode.THINKING) 0.16f else 0f
-        val breathing = 0.96f + pulse * 0.035f + energy * 0.08f
-
-        // Soft ambient halo.
-        paint.style = Paint.Style.FILL
-        paint.shader = RadialGradient(
-            cx, cy, r * 2.15f,
-            intArrayOf(
-                Color.argb(100, Color.red(accent), Color.green(accent), Color.blue(accent)),
-                Color.argb(36, 37, 84, 170),
-                Color.TRANSPARENT
-            ),
-            floatArrayOf(0f, 0.58f, 1f),
-            Shader.TileMode.CLAMP
-        )
-        canvas.drawCircle(cx, cy, r * 2.1f, paint)
-        paint.shader = null
-
-        // Outer instrument rings.
-        paint.style = Paint.Style.STROKE
-        paint.strokeWidth = 1.8f
-        paint.color = Color.argb(205, Color.red(accent), Color.green(accent), Color.blue(accent))
-        canvas.drawCircle(cx, cy, r * (1.24f + energy * 0.08f), paint)
-        paint.strokeWidth = 1f
-        paint.color = Color.argb(95, 128, 177, 255)
-        canvas.drawCircle(cx, cy, r * 1.13f, paint)
-
-        // Rotating segmented orbit.
-        canvas.save()
-        canvas.rotate(-rotation, cx, cy)
-        paint.strokeWidth = 2.6f
-        paint.strokeCap = Paint.Cap.ROUND
-        paint.color = Color.argb(225, 130, 112, 255)
-        val oval = RectF(cx - r * 1.39f, cy - r * 1.39f, cx + r * 1.39f, cy + r * 1.39f)
-        canvas.drawArc(oval, 208f, 72f, false, paint)
-        paint.color = Color.argb(180, 70, 190, 255)
-        canvas.drawArc(oval, 18f, 42f, false, paint)
-        paint.strokeCap = Paint.Cap.BUTT
-        canvas.restore()
-
-        // Rotating orbital ellipse and satellites.
-        canvas.save()
-        canvas.rotate(rotation * 0.42f, cx, cy)
-        paint.strokeWidth = 1f
-        paint.color = Color.argb(85, 111, 174, 255)
-        canvas.drawOval(RectF(cx - r * 1.52f, cy - r * 0.52f, cx + r * 1.52f, cy + r * 0.52f), paint)
-        paint.style = Paint.Style.FILL
-        paint.color = Color.rgb(117, 239, 255)
-        canvas.drawCircle(cx + r * 1.48f, cy, 3.5f + energy * 2f, paint)
-        paint.color = Color.rgb(180, 153, 255)
-        canvas.drawCircle(cx - r * 1.48f, cy, 2.6f, paint)
-        canvas.restore()
-
-        // Glass core.
-        paint.style = Paint.Style.FILL
-        paint.shader = RadialGradient(
-            cx - r * 0.32f, cy - r * 0.38f, r * 1.48f,
-            intArrayOf(
-                Color.rgb(190, 165, 255),
-                Color.rgb(105, 76, 190),
-                Color.rgb(38, 27, 91),
-                Color.rgb(5, 7, 24)
-            ),
-            floatArrayOf(0f, 0.34f, 0.76f, 1f),
-            Shader.TileMode.CLAMP
-        )
-        canvas.drawCircle(cx, cy, r * breathing, paint)
-        paint.shader = null
-
-        // Fine inner rim.
-        paint.style = Paint.Style.STROKE
-        paint.strokeWidth = 1.2f
-        paint.color = Color.argb(155, 180, 225, 255)
-        canvas.drawCircle(cx, cy, r * breathing, paint)
-
-        // Central luminous iris.
-        paint.style = Paint.Style.FILL
-        paint.shader = RadialGradient(
-            cx, cy, r * 0.52f,
-            intArrayOf(Color.argb(230, 235, 220, 255), Color.argb(190, 145, 100, 255), Color.TRANSPARENT),
-            floatArrayOf(0f, 0.22f, 1f),
-            Shader.TileMode.CLAMP
-        )
-        canvas.drawCircle(cx, cy, r * 0.52f, paint)
-        paint.shader = null
-
-        // Voice-reactive equalizer ticks around the core.
-        val bars = 48
-        for (i in 0 until bars) {
-            val angle = (i * 360f / bars) + rotation * 0.16f
-            val radians = Math.toRadians(angle.toDouble())
-            val modulation = if (mode == Mode.LISTENING || mode == Mode.SPEAKING) audioLevel else 0.12f
-            val length = 3f + modulation * (5f + ((i * 7) % 5))
-            val inner = r * 0.78f
-            val outer = inner + length
-            val x1 = cx + kotlin.math.cos(radians).toFloat() * inner
-            val y1 = cy + kotlin.math.sin(radians).toFloat() * inner
-            val x2 = cx + kotlin.math.cos(radians).toFloat() * outer
-            val y2 = cy + kotlin.math.sin(radians).toFloat() * outer
-            paint.style = Paint.Style.STROKE
-            paint.strokeWidth = if (i % 4 == 0) 2.2f else 1.1f
-            paint.strokeCap = Paint.Cap.ROUND
-            paint.color = Color.argb(if (i % 3 == 0) 190 else 95, Color.red(accent), Color.green(accent), Color.blue(accent))
-            canvas.drawLine(x1, y1, x2, y2, paint)
+        private fun sphere(stacks:Int,slices:Int) {
+            val v=ArrayList<Float>(); val ix=ArrayList<Short>()
+            for(i in 0..stacks){val p=Math.PI*i/stacks;for(j in 0..slices){val a=2*Math.PI*j/slices;v.add((sin(p)*cos(a)).toFloat());v.add(kotlin.math.cos(p).toFloat());v.add((sin(p)*sin(a)).toFloat())}}
+            for(i in 0 until stacks)for(j in 0 until slices){val a=i*(slices+1)+j;val b=a+slices+1;ix.add(a.toShort());ix.add(b.toShort());ix.add((a+1).toShort());ix.add((a+1).toShort());ix.add(b.toShort());ix.add((b+1).toShort())}
+            val vb=ByteBuffer.allocateDirect(v.size*4).order(ByteOrder.nativeOrder()).asFloatBuffer();v.forEach{vb.put(it)};vb.position(0);vertices=vb
+            val ib=ByteBuffer.allocateDirect(ix.size*2).order(ByteOrder.nativeOrder()).asShortBuffer();ix.forEach{ib.put(it)};ib.position(0);indices=ib;count=ix.size
         }
-        paint.strokeCap = Paint.Cap.BUTT
+        private fun shader(type:Int,src:String):Int{val s=GLES20.glCreateShader(type);GLES20.glShaderSource(s,src);GLES20.glCompileShader(s);val ok=IntArray(1);GLES20.glGetShaderiv(s,GLES20.GL_COMPILE_STATUS,ok,0);if(ok[0]==0)throw IllegalStateException(GLES20.glGetShaderInfoLog(s));return s}
+        private fun link(v:String,f:String):Int{val p=GLES20.glCreateProgram();GLES20.glAttachShader(p,shader(GLES20.GL_VERTEX_SHADER,v));GLES20.glAttachShader(p,shader(GLES20.GL_FRAGMENT_SHADER,f));GLES20.glLinkProgram(p);val ok=IntArray(1);GLES20.glGetProgramiv(p,GLES20.GL_LINK_STATUS,ok,0);if(ok[0]==0)throw IllegalStateException(GLES20.glGetProgramInfoLog(p));return p}
     }
 }
