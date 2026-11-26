@@ -2011,7 +2011,7 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
                 runOnUiThread {
                     status.text = "ساخت صدای فارسی ناموفق بود: ${e.message ?: "خطای شبکه"}"
                     if (::orbView.isInitialized) setJarvisMode(JarvisOrbView.Mode.IDLE)
-                    if (wakeMode && activityVisible && !isFinishing) startWakeServiceNow()
+                    finishSpeechTurn()
                 }
             }
         }
@@ -2110,11 +2110,12 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
                     else -> "موتور پیش‌فرض گوشی"
                 }
                 status.text = "صدای فارسی JARVIS آماده است · $engineLabel"
-                if (ttsReady || cloudTts.isConfigured()) pendingSpeech?.let { queued -> pendingSpeech = null; speak(queued) }
             }
+            if (ttsReady || cloudTts.isConfigured()) pendingSpeech?.let { queued -> pendingSpeech = null; speak(queued) }
         } else {
             ttsReady = false
-            status.text = "موتور تبدیل متن به گفتار گوشی راه‌اندازی نشد؛ موتور گفتار را در تنظیمات فعال کن."
+            status.text = if (cloudTts.isConfigured()) "صدای فارسی آنلاین آماده استفاده است." else "موتور تبدیل متن به گفتار گوشی راه‌اندازی نشد؛ صدای فارسی آنلاین را در تنظیمات فعال کن."
+            if (cloudTts.isConfigured()) pendingSpeech?.let { queued -> pendingSpeech = null; speak(queued) }
         }
     }
 
@@ -2130,6 +2131,10 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
         androidRecognitionActive = false
         destroySpeechRecognizer()
         if (::tts.isInitialized) { tts.stop(); tts.shutdown() }
+        try { cloudPlayer?.stop() } catch (_: Exception) {}
+        try { cloudPlayer?.release() } catch (_: Exception) {}
+        cloudPlayer = null
+        speechExecutor.shutdownNow()
         // Queue native cleanup behind any active inference to avoid freeing the model mid-generation.
         try {
             executor.execute { try { localAi.unload() } catch (_: Exception) { } }
