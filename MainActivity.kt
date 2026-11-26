@@ -260,7 +260,7 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
             "تنظیم صدا و روشنایی",
             "تنظیمات باتری",
             "پاک‌کردن تاریخچه گفتگو",
-            "دانلود و فعال‌سازی تشخیص صدای فارسی (Whisper)",
+            "دانلود و فعال‌سازی تشخیص گفتار چندزبانه (Whisper)",
             "تنظیم موتور هوش مصنوعی آنلاین (اختیاری)"
         )
         AlertDialog.Builder(this)
@@ -518,8 +518,8 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
 
     private fun promptWhisperModelDownload() {
         showModelDownloadDialog(
-            title = "مدل تشخیص صدای فارسی Whisper",
-            description = "فایل مدل Whisper Base حدود ۸۲ مگابایت است. دانلود مستقیم یا دانلود با Chrome و ADM را انتخاب کن.",
+            title = "مدل چندزبانه تشخیص گفتار Whisper",
+            description = "مدل چندزبانه Whisper Base Q8 حدود ۷۸ مگابایت است و گفتار فارسی و انگلیسی و زبان‌های دیگر را تشخیص می‌دهد. دانلود مستقیم یا دانلود با Chrome و ADM را انتخاب کن.",
             url = WHISPER_MODEL_URL,
             fileName = WHISPER_MODEL_FILENAME,
             isWhisper = true
@@ -1610,8 +1610,8 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
     }
 
     companion object {
-        private const val WHISPER_MODEL_FILENAME = "ggml-base-persian-q8_0.bin"
-        private const val WHISPER_MODEL_URL = "https://huggingface.co/armantee/whisper-base-persian-ggml/resolve/main/ggml-base-persian-q8_0.bin"
+        private const val WHISPER_MODEL_FILENAME = "ggml-base-q8_0.bin"
+        private const val WHISPER_MODEL_URL = "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-base-q8_0.bin"
         private const val KEY_WHISPER_DOWNLOAD_ID = "jarvis_whisper_download_id"
         private const val MODEL_FILENAME = "Qwen3-4B-Instruct-2507-Q4_K_M.gguf"
         private const val MODEL_URL = "https://huggingface.co/bartowski/Qwen_Qwen3-4B-Instruct-2507-GGUF/resolve/main/Qwen3-4B-Instruct-2507-Q4_K_M.gguf"
