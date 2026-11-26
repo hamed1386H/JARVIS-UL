@@ -21,7 +21,7 @@ Java_com_chtai_assistant_WhisperEngine_nativeTranscribe(JNIEnv *env, jobject, jl
     const jsize count = env->GetArrayLength(samples);
     jfloat *audio = env->GetFloatArrayElements(samples, nullptr);
     auto params = whisper_full_default_params(WHISPER_SAMPLING_GREEDY);
-    // The bundled speech model is intended for Persian; forcing fa avoids slow language auto-detection.
+    // Force Persian to skip language detection; use up to four CPU threads on mobile.
     params.language = "fa";
     params.translate = false;
     params.no_context = true;
@@ -29,7 +29,7 @@ Java_com_chtai_assistant_WhisperEngine_nativeTranscribe(JNIEnv *env, jobject, jl
     params.print_progress = false;
     params.print_realtime = false;
     params.print_timestamps = false;
-    params.n_threads = threads > 0 ? std::min(threads, 2) : 2;
+    params.n_threads = threads > 0 ? std::min(threads, 4) : 4;
     const int result = whisper_full(ctx, params, audio, count);
     env->ReleaseFloatArrayElements(samples, audio, JNI_ABORT);
     if (result != 0) return env->NewStringUTF("");
