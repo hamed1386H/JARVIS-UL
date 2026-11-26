@@ -41,6 +41,7 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
     private lateinit var orbView: JarvisOrbView
     private val voiceCaptureActive = java.util.concurrent.atomic.AtomicBoolean(false)
     private lateinit var log: TextView
+    private lateinit var chatScroll: ScrollView
     private lateinit var input: EditText
     private lateinit var tts: TextToSpeech
     private var ttsReady = false
@@ -203,13 +204,14 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
             gravity = Gravity.TOP or Gravity.START
             textDirection = View.TEXT_DIRECTION_FIRST_STRONG_RTL
         }
-        val scroll = ScrollView(this).apply {
+        chatScroll = ScrollView(this).apply {
             isFillViewport = true
             overScrollMode = View.OVER_SCROLL_NEVER
+            isVerticalScrollBarEnabled = true
             addView(log)
             setBackgroundColor(Color.TRANSPARENT)
         }
-        chatShell.addView(scroll, LinearLayout.LayoutParams(-1, 0, 1f))
+        chatShell.addView(chatScroll, LinearLayout.LayoutParams(-1, 0, 1f))
         root.addView(chatShell, LinearLayout.LayoutParams(-1, 0, 1f).apply {
             topMargin = dp(4)
             bottomMargin = dp(12)
@@ -326,6 +328,7 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
 
     private fun addLog(who: String, message: String) {
         log.append("\n\n$who: $message")
+        if (::chatScroll.isInitialized) chatScroll.post { chatScroll.fullScroll(View.FOCUS_DOWN) }
     }
 
     private fun sendTextMessage() {
@@ -512,13 +515,15 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
                 val rate = 16000
                 val minBuffer = AudioRecord.getMinBufferSize(rate, AudioFormat.CHANNEL_IN_MONO, AudioFormat.ENCODING_PCM_16BIT)
                 check(minBuffer > 0) { "ضبط صدای ۱۶ کیلوهرتز در دسترس نیست." }
-                recorder = AudioRecord(MediaRecorder.AudioSource.VOICE_RECOGNITION, rate, AudioFormat.CHANNEL_IN_MONO, AudioFormat.ENCODING_PCM_16BIT, maxOf(minBuffer, 6400))
+                recorder = AudioRecord(MediaRecorder.AudioSource.MIC, rate, AudioFormat.CHANNEL_IN_MONO, AudioFormat.ENCODING_PCM_16BIT, maxOf(minBuffer * 2, 12800))
                 check(recorder.state == AudioRecord.STATE_INITIALIZED) { "میکروفون آماده نشد." }
                 val chunk = ShortArray(320); val samples = ArrayList<Float>(rate * 12)
                 var started = false; var silence = 0; var elapsed = 0
                 recorder.startRecording()
                 while (elapsed < 15000 && (!started || silence < 850)) {
-                    val n = recorder.read(chunk, 0, chunk.size); if (n <= 0) continue
+                    val n = recorder.read(chunk, 0, chunk.size)
+                    if (n < 0) throw IllegalStateException("خطای خواندن میکروفون: $n")
+                    if (n == 0) continue
                     var energy = 0.0
                     for (i in 0 until n) { val v = chunk[i].toFloat() / 32768f; samples.add(v); energy += chunk[i].toDouble() * chunk[i].toDouble() }
                     val rms = kotlin.math.sqrt(energy / n).toInt()
@@ -527,9 +532,10 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
                     val level = (rms / 5000f).coerceIn(0f, 1f)
                     runOnUiThread { orbView.setAudioLevel(level) }
                 }
+                if (!started) throw IllegalStateException("صدایی دریافت نشد؛ نزدیک‌تر به میکروفون صحبت کن و دوباره تلاش کن.")
                 recorder.stop()
                 val audio = FloatArray(samples.size) { samples[it] }
-                runOnUiThread { orbView.setAudioLevel(0f); orbView.setMode(JarvisOrbView.Mode.THINKING); status.text = "در حال تشخیص خودکار زبان گفتار با Whisper…" }
+                runOnUiThread { orbView.setAudioLevel(0f); orbView.setMode(JarvisOrbView.Mode.THINKING); status.text = "در حال تبدیل صدای فارسی به متن…" }
                 if (audio.size < rate / 2) { runOnUiThread { status.text = "صدایی دریافت نشد؛ دوباره صحبت کن"; orbView.setMode(JarvisOrbView.Mode.IDLE) }; return@execute }
                 val words = whisper.transcribe(audio)
                 runOnUiThread { if (words.isNotBlank()) { addLog("شما", words); handleCommand(words) } else { status.text = "متوجه صحبتت نشدم؛ دوباره بگو"; orbView.setMode(JarvisOrbView.Mode.IDLE) } }
