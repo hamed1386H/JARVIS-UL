@@ -364,8 +364,7 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
                 if (cloudTts.isConfigured()) {
                     val queued = pendingSpeech
                     pendingSpeech = null
-                    reply("صدای فارسی آنلاین ذخیره شد؛ سلام قربان، در خدمتم.")
-                    if (!queued.isNullOrBlank()) speak(queued)
+                    reply(queued?.takeIf { it.isNotBlank() } ?: "صدای فارسی آنلاین ذخیره شد؛ سلام قربان، در خدمتم.")
                 } else reply("کلید API و شناسه صدا را کامل وارد کن.")
             }
             .setNeutralButton("پاک‌کردن") { _, _ -> cloudTts.saveConfig("", ""); reply("صدای فارسی آنلاین غیرفعال شد.") }
