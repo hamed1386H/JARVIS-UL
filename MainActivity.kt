@@ -75,6 +75,14 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
         java.io.File(base, MODEL_FILENAME)
     }
     private var modelReceiverRegistered = false
+    private var wakeReceiverRegistered = false
+    private val wakeDetectedReceiver = object : BroadcastReceiver() {
+        override fun onReceive(context: Context?, intent: Intent?) {
+            if (intent?.action == WakeWordService.ACTION_WAKE_DETECTED && activityVisible) {
+                reply("در خدمتم")
+            }
+        }
+    }
     private val modelDownloadReceiver = object : BroadcastReceiver() {
         override fun onReceive(context: Context?, intent: Intent?) {
             if (intent?.action == DownloadManager.ACTION_DOWNLOAD_COMPLETE) {
@@ -465,11 +473,20 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
         activityVisible = true
         updatePermissionStatus()
         scanGrantedDownloadFolder()
+        if (!wakeReceiverRegistered) {
+            ContextCompat.registerReceiver(this, wakeDetectedReceiver,
+                IntentFilter(WakeWordService.ACTION_WAKE_DETECTED), ContextCompat.RECEIVER_NOT_EXPORTED)
+            wakeReceiverRegistered = true
+        }
         // Push-to-talk only: never start microphone capture automatically on resume.
     }
 
     override fun onPause() {
         activityVisible = false
+        if (wakeReceiverRegistered) {
+            try { unregisterReceiver(wakeDetectedReceiver) } catch (_: Exception) {}
+            wakeReceiverRegistered = false
+        }
         super.onPause()
     }
 
@@ -1639,6 +1656,10 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
         if (modelReceiverRegistered) {
             try { unregisterReceiver(modelDownloadReceiver) } catch (_: Exception) { }
             modelReceiverRegistered = false
+        }
+        if (wakeReceiverRegistered) {
+            try { unregisterReceiver(wakeDetectedReceiver) } catch (_: Exception) {}
+            wakeReceiverRegistered = false
         }
         if (::tts.isInitialized) { tts.stop(); tts.shutdown() }
         // Queue native cleanup behind any active inference to avoid freeing the model mid-generation.
