@@ -1121,6 +1121,17 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
                                 setJarvisMode(JarvisOrbView.Mode.IDLE)
                             }
                         }
+                        // Re-arm only after AudioRecord is released and the capture lock is cleared.
+                        // Previously finishSpeechTurn() could call beginListening() too early,
+                        // while voiceCaptureActive was still true, leaving live mode stuck after one turn.
+                        if (voiceSessionActive && activityVisible && !isFinishing) {
+                            android.os.Handler(mainLooper).postDelayed({
+                                if (voiceSessionActive && activityVisible && !isFinishing &&
+                                    !voiceCaptureActive.get() && !androidRecognitionActive && !isJarvisSpeaking()) {
+                                    beginListening()
+                                }
+                            }, 350)
+                        }
                     }
                 }
             }
