@@ -21,6 +21,7 @@ class WakeWordService : Service() {
     private var wakeLock: android.os.PowerManager.WakeLock? = null
     private val channelId = "cht_wake_service_v2"
     private val notificationId = 7701
+    private val wakeNotificationId = 7704
 
     override fun onCreate() {
         super.onCreate()
@@ -57,7 +58,8 @@ class WakeWordService : Service() {
             .setContentTitle(if (wakeDetected) "JARVIS صدایت را شنید" else "JARVIS فعال است")
             .setContentText(message)
             .setContentIntent(content)
-            .setOngoing(true)
+            .setOngoing(!wakeDetected)
+            .setAutoCancel(wakeDetected)
             .setOnlyAlertOnce(!wakeDetected)
             .setCategory(NotificationCompat.CATEGORY_CALL)
             .setPriority(if (wakeDetected) NotificationCompat.PRIORITY_MAX else NotificationCompat.PRIORITY_LOW)
@@ -68,8 +70,13 @@ class WakeWordService : Service() {
     }
 
     private fun updateNotification(message: String, wakeDetected: Boolean = false) {
-        getSystemService(NotificationManager::class.java)
-            .notify(notificationId, buildNotification(message, wakeDetected))
+        val manager = getSystemService(NotificationManager::class.java)
+        if (wakeDetected) {
+            // Post a separate alert so Android treats the full-screen wake intent as a new alert.
+            manager.notify(wakeNotificationId, buildNotification(message, true))
+        } else {
+            manager.notify(notificationId, buildNotification(message))
+        }
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
@@ -78,6 +85,7 @@ class WakeWordService : Service() {
             stopSelf()
             return START_NOT_STICKY
         }
+        getSystemService(NotificationManager::class.java).cancel(wakeNotificationId)
         if (running.compareAndSet(false, true)) {
             worker = Thread { localWakeLoop() }.also {
                 it.name = "Jarvis-Local-Wake"

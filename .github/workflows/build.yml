@@ -50,6 +50,16 @@ jobs:
           from pathlib import Path
           p = Path('jarvis-source/app/src/main/AndroidManifest.xml')
           s = p.read_text()
+          required_permissions = [
+              'android.permission.USE_FULL_SCREEN_INTENT',
+              'android.permission.FOREGROUND_SERVICE',
+              'android.permission.FOREGROUND_SERVICE_MICROPHONE',
+              'android.permission.WAKE_LOCK',
+              'android.permission.POST_NOTIFICATIONS',
+          ]
+          for permission in required_permissions:
+              if permission not in s:
+                  s = s.replace('</manifest>', f'    <uses-permission android:name="{permission}" />\\n</manifest>')
           missing = []
           if 'android.speech.RecognitionService' not in s:
               missing.append('''        <intent>
