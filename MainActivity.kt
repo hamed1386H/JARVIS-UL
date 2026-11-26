@@ -53,6 +53,7 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
     private var speechRecognizer: SpeechRecognizer? = null
     @Volatile private var androidRecognitionActive = false
     private var ttsReady = false
+    private var selectedTtsEnginePackage = ""
     @Volatile private var pendingSpeech: String? = null
     private var wakeMode = false
     private val executor = Executors.newSingleThreadExecutor()
@@ -107,14 +108,18 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        // Prefer Google's Android speech engine when installed; otherwise use an installed engine.
+        // Prefer Xiaomi's installed TTS engine silently; fall back to Google, then the system default.
         val ttsEngines = try {
             packageManager.queryIntentServices(Intent(TextToSpeech.Engine.INTENT_ACTION_TTS_SERVICE), 0)
                 .map { it.serviceInfo.packageName }.distinct()
         } catch (_: Exception) { emptyList() }
-        val preferredTtsEngine = ttsEngines.firstOrNull { it == "com.google.android.tts" }
-            ?: ttsEngines.firstOrNull()
-        tts = if (preferredTtsEngine.isNullOrBlank()) TextToSpeech(this, this)
+        val preferredTtsEngine = ttsEngines.firstOrNull {
+            val name = it.lowercase(Locale.ROOT)
+            name.contains("xiaomi") || name.contains("miui") || name.contains("mibrain")
+        } ?: ttsEngines.firstOrNull { it == "com.google.android.tts" }
+          ?: ttsEngines.firstOrNull()
+        selectedTtsEnginePackage = preferredTtsEngine.orEmpty()
+        tts = if (preferredTtsEngine.isBlank()) TextToSpeech(this, this)
             else TextToSpeech(this, this, preferredTtsEngine)
         restoreConversation()
         buildUi()
@@ -563,7 +568,23 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
     private fun startAndroidSpeechRecognition() {
         try {
             speechRecognizer?.destroy()
-            val recognizer = SpeechRecognizer.createSpeechRecognizer(this)
+            // Use Xiaomi's standard Android recognition service when it is installed.
+            // This binds directly to the service; it does not open Xiaomi settings or another app.
+            val xiaomiRecognizer = if (android.os.Build.VERSION.SDK_INT >= 31) {
+                try {
+                    packageManager.queryIntentServices(
+                        Intent(SpeechRecognizer.SERVICE_INTERFACE), PackageManager.MATCH_ALL
+                    ).firstOrNull { service ->
+                        val packageName = service.serviceInfo.packageName.lowercase(Locale.ROOT)
+                        packageName.contains("xiaomi") || packageName.contains("miui") ||
+                            packageName.contains("mibrain")
+                    }?.serviceInfo?.let { android.content.ComponentName(it.packageName, it.name) }
+                } catch (_: Exception) { null }
+            } else null
+            val recognizer = if (xiaomiRecognizer != null && SpeechRecognizer.isRecognitionAvailable(this)) {
+                try { SpeechRecognizer.createSpeechRecognizer(this, xiaomiRecognizer) }
+                catch (_: Exception) { SpeechRecognizer.createSpeechRecognizer(this) }
+            } else SpeechRecognizer.createSpeechRecognizer(this)
             speechRecognizer = recognizer
             androidRecognitionActive = true
             setJarvisMode(JarvisOrbView.Mode.LISTENING)
@@ -1970,7 +1991,14 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
             if (!ttsReady) {
                 status.text = "صدای فارسی روی موتور گفتار نصب یا پشتیبانی نمی‌شود؛ از تنظیمات، داده گفتار فارسی را نصب کن."
             } else {
-                status.text = "صدای فارسی JARVIS آماده است."
+                val engineLabel = when {
+                    selectedTtsEnginePackage.contains("xiaomi", true) ||
+                        selectedTtsEnginePackage.contains("miui", true) ||
+                        selectedTtsEnginePackage.contains("mibrain", true) -> "شیائومی"
+                    selectedTtsEnginePackage == "com.google.android.tts" -> "Google"
+                    else -> "موتور پیش‌فرض گوشی"
+                }
+                status.text = "صدای فارسی JARVIS آماده است · $engineLabel"
                 pendingSpeech?.let { queued -> pendingSpeech = null; speak(queued) }
             }
         } else {
