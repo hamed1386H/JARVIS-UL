@@ -304,25 +304,77 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
     private fun dp(value: Int): Int = (value * resources.displayMetrics.density).toInt()
     private fun glass(fill: Int, stroke: Int, radiusDp: Int): android.graphics.drawable.GradientDrawable = android.graphics.drawable.GradientDrawable().apply { setColor(fill); cornerRadius = dp(radiusDp).toFloat(); setStroke(dp(1), stroke) }
     private fun showJarvisSettings() {
-        val groups = arrayOf(
-            "🧠 هوش مصنوعی و مدل‌ها" to arrayOf("دانلود / فعال‌سازی مدل محلی Qwen", "انتخاب فایل مدل GGUF", "تخلیه مدل از حافظه", "روشن / خاموش کردن هوش محلی", "تنظیم موتور هوش آنلاین"),
-            "🎙 صدا و گفتار" to arrayOf("انتخاب صدای خروجی JARVIS", "تنظیم صدای فارسی آنلاین (مردانه)", "دانلود / فعال‌سازی تشخیص گفتار Whisper", "راهنمای نصب صدای فارسی گوشی"),
-            "📱 گوشی و دسترسی‌ها" to arrayOf("مدیریت مجوزهای گوشی", "برنامه‌های نصب‌شده", "تنظیمات وای‌فای", "تنظیمات بلوتوث", "صدا و روشنایی", "تنظیمات باتری"),
-            "⚙️ دستیار و اطلاعات" to arrayOf("فعال / غیرفعال کردن گوش‌به‌زنگ", "تغییر فرمان بیدار باش", "پاک‌کردن تاریخچه گفتگو", "درباره JARVIS")
-        )
-        val actions = arrayOf(
-            arrayOf<() -> Unit>({ promptRecommendedModelDownload() }, { selectLocalModel() }, { unloadLocalModel() }, { toggleLocalAi() }, { showOnlineAiSettings() }),
-            arrayOf<() -> Unit>({ showVoicePicker() }, { showPersianCloudTtsSettings() }, { promptWhisperModelDownload() }, { showTtsHelp() }),
-            arrayOf<() -> Unit>({ showPermissionCenter() }, { showApps() }, { openWifi() }, { openSettings(Settings.ACTION_BLUETOOTH_SETTINGS) }, { volumeDialog() }, { openSettings(Settings.ACTION_BATTERY_SAVER_SETTINGS) }),
-            arrayOf<() -> Unit>({ toggleWakeMode() }, { showWakePhraseSettings() }, { clearConversation() }, { showAboutJarvis() })
-        )
-        AlertDialog.Builder(this).setTitle("تنظیمات JARVIS")
-            .setItems(groups.map { it.first }.toTypedArray()) { _, group ->
-                AlertDialog.Builder(this).setTitle(groups[group].first)
-                    .setItems(groups[group].second) { _, item -> actions[group][item].invoke() }
-                    .setNegativeButton("بازگشت") { _, _ -> showJarvisSettings() }
-                    .show()
-            }.setNegativeButton("بستن", null).show()
+        val scroll = ScrollView(this).apply { isFillViewport = true; setBackgroundColor(Color.rgb(3, 5, 17)) }
+        val root = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(dp(16), dp(12), dp(16), dp(18))
+        }
+        scroll.addView(root)
+        root.addView(TextView(this).apply {
+            text = "J A R V I S  /  CONTROL CENTER"
+            textSize = 11f; letterSpacing = 0.18f
+            setTextColor(Color.rgb(90, 218, 245)); setPadding(dp(4), dp(4), dp(4), dp(12))
+        })
+        fun section(title: String, subtitle: String, actions: List<Pair<String, () -> Unit>>) {
+            val card = LinearLayout(this).apply {
+                orientation = LinearLayout.VERTICAL
+                setPadding(dp(13), dp(12), dp(13), dp(12))
+                background = android.graphics.drawable.GradientDrawable(
+                    android.graphics.drawable.GradientDrawable.Orientation.TL_BR,
+                    intArrayOf(Color.rgb(14, 24, 48), Color.rgb(8, 12, 29))
+                ).apply { cornerRadius = dp(18).toFloat(); setStroke(dp(1), Color.rgb(36, 91, 128)) }
+                elevation = dp(5).toFloat()
+            }
+            card.addView(TextView(this).apply {
+                text = title; textSize = 16f; typeface = Typeface.DEFAULT_BOLD
+                setTextColor(Color.rgb(225, 243, 255))
+            })
+            card.addView(TextView(this).apply {
+                text = subtitle; textSize = 11f
+                setTextColor(Color.rgb(133, 169, 197)); setPadding(0, dp(3), 0, dp(9))
+            })
+            actions.forEach { (label, action) ->
+                val button = actionButton(label, label, action)
+                button.gravity = Gravity.CENTER_VERTICAL or Gravity.START
+                button.textSize = 13f
+                card.addView(button, LinearLayout.LayoutParams(-1, dp(44)).apply { topMargin = dp(4) })
+            }
+            root.addView(card, LinearLayout.LayoutParams(-1, -2).apply { bottomMargin = dp(11) })
+        }
+        section("01  ·  VOICE & CONVERSATION", "گفتگوی زنده، صدای فارسی و موتور تشخیص", listOf(
+            "شروع / پایان مکالمه صوتی زنده" to { toggleVoiceConversation() },
+            "انتخاب صدای خروجی JARVIS" to { showVoicePicker() },
+            "تنظیم صدای فارسی آنلاین" to { showPersianCloudTtsSettings() },
+            "فعال‌سازی موتور Whisper" to { promptWhisperModelDownload() }
+        ))
+        section("02  ·  INTELLIGENCE CORE", "مدل محلی و اتصال هوش آنلاین", listOf(
+            "دانلود / فعال‌سازی مدل محلی Qwen" to { promptRecommendedModelDownload() },
+            "انتخاب فایل مدل GGUF" to { selectLocalModel() },
+            "تخلیه مدل از حافظه" to { unloadLocalModel() },
+            "تنظیم موتور هوش آنلاین و API" to { showOnlineAiSettings() }
+        ))
+        section("03  ·  WAKE & BACKGROUND", "فرمان بیدارباش و پایداری سرویس", listOf(
+            "فعال / غیرفعال کردن گوش‌به‌زنگ" to { toggleWakeMode() },
+            "تغییر فرمان بیدارباش" to { showWakePhraseSettings() },
+            "باتری، شروع خودکار و صفحه قفل" to { showBackgroundPersistenceOptions() }
+        ))
+        section("04  ·  DEVICE ACCESS", "مجوزهای اندروید با ورود مستقیم به صفحه تنظیم مربوطه", listOf(
+            "مرکز مجوزهای گوشی" to { showPermissionCenter() },
+            "تنظیمات اعلان‌های JARVIS" to {
+                try { startActivity(Intent(Settings.ACTION_APP_NOTIFICATION_SETTINGS).putExtra(Settings.EXTRA_APP_PACKAGE, packageName)) }
+                catch (_: Exception) { openAppDetails() }
+            },
+            "صفحه اطلاعات و مجوزهای برنامه" to { openAppDetails() },
+            "تنظیمات باتری گوشی" to { openSettings(Settings.ACTION_BATTERY_SAVER_SETTINGS) }
+        ))
+        section("05  ·  SYSTEM & PRIVACY", "کنترل‌های گوشی و مدیریت داده", listOf(
+            "برنامه‌های نصب‌شده" to { showApps() },
+            "تنظیمات اینترنت و Wi-Fi" to { openWifi() },
+            "پاک‌کردن تاریخچه گفتگو" to { clearConversation() },
+            "درباره JARVIS" to { showAboutJarvis() }
+        ))
+        AlertDialog.Builder(this).setTitle("JARVIS  ·  Control Center")
+            .setView(scroll).setNegativeButton("بستن", null).show()
     }
 
     private fun showWakePhraseSettings() {
