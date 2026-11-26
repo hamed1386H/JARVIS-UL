@@ -102,7 +102,10 @@ class WakeWordService : Service() {
                 val heard = engine.transcribe(samples).lowercase()
                     .replace("ي", "ی").replace("ك", "ک")
                 if (listOf("جارویس", "هی جارویس", "جارویس بیدار شو", "جارویس گوش کن").any { heard.contains(it) }) {
-                    updateNotification("عبارت جارویس شنیده شد؛ اعلان را لمس کن تا فرمان بدهی")
+                    running.set(false)
+                    updateNotification("جارویس بیدار شد؛ پاسخ می‌دهد")
+                    sendBroadcast(Intent(ACTION_WAKE_DETECTED).setPackage(packageName))
+                    break
                 }
             }
         } catch (e: Exception) {
@@ -124,5 +127,8 @@ class WakeWordService : Service() {
     }
 
     override fun onBind(intent: Intent?): IBinder? = null
-    companion object { const val ACTION_STOP = "com.chtai.assistant.STOP_WAKE" }
+    companion object {
+        const val ACTION_STOP = "com.chtai.assistant.STOP_WAKE"
+        const val ACTION_WAKE_DETECTED = "com.chtai.assistant.WAKE_DETECTED"
+    }
 }
