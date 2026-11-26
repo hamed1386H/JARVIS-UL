@@ -302,8 +302,4 @@ class WakeWordService : Service() {
 
     override fun onBind(intent: Intent?): IBinder? = null
 
-    companion object {
-        const val ACTION_STOP = "com.chtai.assistant.STOP_WAKE"
-        const val ACTION_WAKE_DETECTED = "com.chtai.assistant.WAKE_DETECTED"
-    }
 }
