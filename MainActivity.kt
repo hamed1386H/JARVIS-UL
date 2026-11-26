@@ -54,6 +54,7 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
     private val requestMic = 102
     private val requestCorePermissions = 103
     private var permissionStatusView: TextView? = null
+    private var firstLaunchPermissionFlowPending = false
     private var torchOn = false
     private var dndOn = false
     // Keep a short, user-visible conversation context so the AI can follow follow-up questions.
@@ -101,6 +102,7 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
         registerModelDownloadReceiver()
         autoLoadLocalModel()
         autoLoadWhisperModel()
+        window.decorView.post { startFirstLaunchPermissionFlow() }
     }
 
     private fun buildUi() {
@@ -405,12 +407,28 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
             .show()
     }
 
+    private fun startFirstLaunchPermissionFlow() {
+        if (prefs.getBoolean("initial_permissions_prompted", false)) return
+        prefs.edit().putBoolean("initial_permissions_prompted", true).apply()
+        firstLaunchPermissionFlowPending = true
+        addLog("JARVIS", "برای فعال‌سازی امکانات صوتی و کنترلی، مجوزهای لازم را درخواست می‌کنم.")
+        requestCorePermissionsNow()
+    }
+
+    private fun finishFirstLaunchPermissionFlow() {
+        if (!firstLaunchPermissionFlowPending) return
+        firstLaunchPermissionFlowPending = false
+        updatePermissionStatus()
+        showPermissionCenter()
+    }
+
     private fun requestCorePermissionsNow() {
-        val missing = arrayOf(Manifest.permission.RECORD_AUDIO, Manifest.permission.CAMERA)
-            .filter { ContextCompat.checkSelfPermission(this, it) != PackageManager.PERMISSION_GRANTED }
+        val requested = mutableListOf(Manifest.permission.RECORD_AUDIO, Manifest.permission.CAMERA)
+        if (android.os.Build.VERSION.SDK_INT >= 33) requested.add(Manifest.permission.POST_NOTIFICATIONS)
+        val missing = requested.distinct().filter { ContextCompat.checkSelfPermission(this, it) != PackageManager.PERMISSION_GRANTED }
         if (missing.isEmpty()) {
-            reply("میکروفون و دوربین از قبل مجاز هستند")
             updatePermissionStatus()
+            finishFirstLaunchPermissionFlow()
             return
         }
         ActivityCompat.requestPermissions(this, missing.toTypedArray(), requestCorePermissions)
@@ -468,7 +486,8 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
         val camera = ContextCompat.checkSelfPermission(this, Manifest.permission.CAMERA) == PackageManager.PERMISSION_GRANTED
         val write = Settings.System.canWrite(this)
         val dnd = hasDndAccess()
-        permissionStatusView?.text = "وضعیت فعلی:\n${if (mic) "✓" else "○"} میکروفون\n${if (camera) "✓" else "○"} دوربین / چراغ‌قوه\n${if (write) "✓" else "○"} تغییر تنظیمات سیستم / روشنایی\n${if (dnd) "✓" else "○"} حالت مزاحم نشو\n\nعلامت ✓ یعنی مجوز فعال است."
+        val notifications = android.os.Build.VERSION.SDK_INT < 33 || ContextCompat.checkSelfPermission(this, Manifest.permission.POST_NOTIFICATIONS) == PackageManager.PERMISSION_GRANTED
+        permissionStatusView?.text = "وضعیت فعلی:\n${if (mic) "✓" else "○"} میکروفون\n${if (camera) "✓" else "○"} دوربین / چراغ‌قوه\n${if (notifications) "✓" else "○"} اعلان‌ها\n${if (write) "✓" else "○"} تغییر تنظیمات سیستم / روشنایی\n${if (dnd) "✓" else "○"} حالت مزاحم نشو\n\nعلامت ✓ یعنی مجوز فعال است."
     }
 
     override fun onResume() {
@@ -1627,7 +1646,8 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
             updatePermissionStatus()
             val micGranted = ContextCompat.checkSelfPermission(this, Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED
             val cameraGranted = ContextCompat.checkSelfPermission(this, Manifest.permission.CAMERA) == PackageManager.PERMISSION_GRANTED
-            reply("نتیجه مجوزها: میکروفون ${if (micGranted) "فعال" else "غیرفعال"}، دوربین/چراغ‌قوه ${if (cameraGranted) "فعال" else "غیرفعال"}. برای مجوزهای ویژه، دکمه‌های مرکز مجوزها را جداگانه استفاده کن.")
+            reply("نتیجه مجوزها بررسی شد. مجوزهای ویژه را می‌توانی از مرکز مجوزها فعال کنی.")
+            finishFirstLaunchPermissionFlow()
         }
     }
 
