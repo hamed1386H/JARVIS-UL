@@ -1443,46 +1443,7 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
     }
 
     private fun askLocal(prompt: String) {
-        // Prefer the configured online model; if it fails, continue with local Qwen.
-        if (agentCore.isOnlineConfigured()) {
-            status.text = "در حال اتصال به موتور آنلاین…"
-            orbView.setMode(JarvisOrbView.Mode.THINKING)
-            executor.execute {
-                try {
-                    val answer = agentCore.askOnline(prompt)
-                    runOnUiThread {
-                        addLog("شما", prompt)
-                        addConversationMessage("user", prompt)
-                        addLog("JARVIS • ONLINE", answer)
-                        addConversationMessage("assistant", answer)
-                        status.text = "پاسخ آنلاین آماده شد"
-                        speak(answer)
-                    }
-                    return@execute
-                } catch (e: Exception) {
-                    val onlineError = e.message?.take(220) ?: "خطای نامشخص"
-                    runOnUiThread { status.text = "اتصال آنلاین ناموفق؛ بررسی موتور پشتیبان…" }
-                    if (!localAi.isLoaded()) {
-                        runOnUiThread {
-                            orbView.setMode(JarvisOrbView.Mode.IDLE)
-                            reply("اتصال API برقرار نشد: $onlineError\\nبرنامه بسته نمی‌شود. آدرس، نام مدل و کلید API را بررسی کن.")
-                        }
-                        return@execute
-                    }
-                }
-                try {
-                    val answer = localAi.generate(agentCore.buildLocalPrompt(prompt, conversation), 256).trim()
-                    runOnUiThread {
-                        addLog("شما", prompt); addConversationMessage("user", prompt)
-                        addLog("JARVIS • LOCAL", answer); addConversationMessage("assistant", answer)
-                        status.text = "پاسخ محلی آماده شد"; speak(answer)
-                    }
-                } catch (e: Exception) {
-                    runOnUiThread { reply("خطای موتور محلی: ${e.message ?: "نامشخص"}") }
-                }
-            }
-            return
-        }
+        // Local-first mode: never require or automatically call a remote API.
         if (!prefs.getBoolean("local_ai_enabled", true)) {
             reply("هوش مصنوعی خاموش است. از تنظیمات JARVIS آن را فعال کن؛ فرمان‌های پایه همچنان کار می‌کنند.")
             return
