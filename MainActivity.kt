@@ -304,13 +304,13 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
             "🧠 هوش مصنوعی و مدل‌ها" to arrayOf("دانلود / فعال‌سازی مدل محلی Qwen", "انتخاب فایل مدل GGUF", "تخلیه مدل از حافظه", "روشن / خاموش کردن هوش محلی", "تنظیم موتور هوش آنلاین"),
             "🎙 صدا و گفتار" to arrayOf("انتخاب صدای خروجی JARVIS", "تنظیم صدای فارسی آنلاین (مردانه)", "دانلود / فعال‌سازی تشخیص گفتار Whisper", "راهنمای نصب صدای فارسی گوشی"),
             "📱 گوشی و دسترسی‌ها" to arrayOf("مدیریت مجوزهای گوشی", "برنامه‌های نصب‌شده", "تنظیمات وای‌فای", "تنظیمات بلوتوث", "صدا و روشنایی", "تنظیمات باتری"),
-            "⚙️ دستیار و اطلاعات" to arrayOf("فعال / غیرفعال کردن گوش‌به‌زنگ", "پاک‌کردن تاریخچه گفتگو", "درباره JARVIS")
+            "⚙️ دستیار و اطلاعات" to arrayOf("فعال / غیرفعال کردن گوش‌به‌زنگ", "تغییر فرمان بیدار باش", "پاک‌کردن تاریخچه گفتگو", "درباره JARVIS")
         )
         val actions = arrayOf(
             arrayOf<() -> Unit>({ promptRecommendedModelDownload() }, { selectLocalModel() }, { unloadLocalModel() }, { toggleLocalAi() }, { showOnlineAiSettings() }),
             arrayOf<() -> Unit>({ showVoicePicker() }, { showPersianCloudTtsSettings() }, { promptWhisperModelDownload() }, { showTtsHelp() }),
             arrayOf<() -> Unit>({ showPermissionCenter() }, { showApps() }, { openWifi() }, { openSettings(Settings.ACTION_BLUETOOTH_SETTINGS) }, { volumeDialog() }, { openSettings(Settings.ACTION_BATTERY_SAVER_SETTINGS) }),
-            arrayOf<() -> Unit>({ toggleWakeMode() }, { clearConversation() }, { showAboutJarvis() })
+            arrayOf<() -> Unit>({ toggleWakeMode() }, { showWakePhraseSettings() }, { clearConversation() }, { showAboutJarvis() })
         )
         AlertDialog.Builder(this).setTitle("تنظیمات JARVIS")
             .setItems(groups.map { it.first }.toTypedArray()) { _, group ->
@@ -319,6 +319,44 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
                     .setNegativeButton("بازگشت") { _, _ -> showJarvisSettings() }
                     .show()
             }.setNegativeButton("بستن", null).show()
+    }
+
+    private fun showWakePhraseSettings() {
+        val current = prefs.getString("wake_phrase", "جارویس") ?: "جارویس"
+        val field = EditText(this).apply {
+            setText(current)
+            hint = "مثلاً: جارویس یا دستیار"
+            textSize = 17f
+            setSingleLine(true)
+            setSelection(text.length)
+        }
+        val panel = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(dp(20), dp(10), dp(20), dp(4))
+            addView(TextView(this@MainActivity).apply {
+                text = "عبارتی را وارد کن که JARVIS با شنیدن آن بیدار شود. بهتر است کوتاه و واضح باشد."
+                textSize = 13f
+                setTextColor(Color.LTGRAY)
+            })
+            addView(field, LinearLayout.LayoutParams(-1, dp(52)))
+        }
+        AlertDialog.Builder(this).setTitle("تغییر فرمان بیدار باش")
+            .setView(panel)
+            .setPositiveButton("ذخیره") { _, _ ->
+                val phrase = field.text.toString().trim().lowercase()
+                    .replace("ي", "ی").replace("ك", "ک")
+                if (phrase.length < 2 || phrase.length > 32) {
+                    reply("عبارت بیدارباش باید بین ۲ تا ۳۲ نویسه باشد.")
+                } else {
+                    prefs.edit().putString("wake_phrase", phrase).apply()
+                    reply("فرمان بیدارباش به «$phrase» تغییر کرد. سرویس گوش‌به‌زنگ را یک‌بار خاموش و روشن کن.")
+                }
+            }
+            .setNeutralButton("بازگشت به جارویس") { _, _ ->
+                prefs.edit().putString("wake_phrase", "جارویس").apply()
+                reply("فرمان بیدارباش به جارویس برگشت.")
+            }
+            .setNegativeButton("لغو", null).show()
     }
 
     private fun showAboutJarvis() {
