@@ -1363,7 +1363,7 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
                 if (!smsReceiverRegistered) { ContextCompat.registerReceiver(this, smsSentReceiver, IntentFilter(smsSentAction), ContextCompat.RECEIVER_NOT_EXPORTED); smsReceiverRegistered = true }
                 val callbackIntent = Intent(smsSentAction).setPackage(packageName).putExtra("recipient", name)
                 val callback = android.app.PendingIntent.getBroadcast(this, System.currentTimeMillis().toInt(), callbackIntent, android.app.PendingIntent.FLAG_UPDATE_CURRENT or android.app.PendingIntent.FLAG_MUTABLE)
-                val manager = if (android.os.Build.VERSION.SDK_INT >= 31) getSystemService(android.telephony.SmsManager::class.java) else @Suppress("DEPRECATION") android.telephony.SmsManager.getDefault()
+                val manager = getSystemService(android.telephony.SmsManager::class.java) ?: throw IllegalStateException("سرویس پیامک در دسترس نیست")
                 val parts = manager.divideMessage(body)
                 if (parts.size <= 1) manager.sendTextMessage(number, null, body, callback, null) else manager.sendMultipartTextMessage(number, null, parts, ArrayList(java.util.Collections.nCopies(parts.size, callback)), null)
                 reply("پیامک به $name در حال ارسال است.")
@@ -2162,6 +2162,7 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
     }
 
     override fun onDestroy() {
+        if (smsReceiverRegistered) { try { unregisterReceiver(smsSentReceiver) } catch (_: Exception) { }; smsReceiverRegistered = false }
         if (modelReceiverRegistered) {
             try { unregisterReceiver(modelDownloadReceiver) } catch (_: Exception) { }
             modelReceiverRegistered = false
