@@ -274,7 +274,13 @@ import kotlin.math.roundToInt
         setContentView(root)
     }
 
-    private fun openJarvisSettingsSafely() {\n        try { showJarvisSettings() } catch (e: Exception) {\n            Toast.makeText(this, "باز کردن تنظیمات ممکن نشد؛ دوباره تلاش کن.", Toast.LENGTH_LONG).show()\n        }\n    }\n\n    private fun showJarvisMenu() {
+    private fun openJarvisSettingsSafely() {
+        try { showJarvisSettings() } catch (e: Exception) {
+            Toast.makeText(this, "باز کردن تنظیمات ممکن نشد؛ دوباره تلاش کن.", Toast.LENGTH_LONG).show()
+        }
+    }
+
+    private fun showJarvisMenu() {
         val items = arrayOf("خانه و دستیار صوتی", "گفتگوی متنی", "تنظیمات", "برنامه‌های گوشی", "درباره JARVIS")
         AlertDialog.Builder(this).setTitle("منوی JARVIS").setItems(items) { _, which ->
             when (which) {
