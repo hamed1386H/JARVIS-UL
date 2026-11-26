@@ -42,8 +42,8 @@ Java_com_chtai_assistant_LocalAiEngine_nativeLoad(JNIEnv * env, jobject,
 
     llama_context_params contextParams = llama_context_default_params();
     contextParams.n_ctx = static_cast<uint32_t>(contextSize);
-    contextParams.n_batch = 32;
-    contextParams.n_ubatch = 16;
+    contextParams.n_batch = 8;
+    contextParams.n_ubatch = 8;
     contextParams.n_threads = threads;
     contextParams.n_threads_batch = threads;
     state->context = llama_init_from_model(state->model, contextParams);
@@ -103,7 +103,7 @@ Java_com_chtai_assistant_LocalAiEngine_nativeGenerate(JNIEnv * env, jobject,
     // llama_decode cannot accept more tokens than contextParams.n_batch (128).
     // Split long Persian prompts/history into bounded batches; request logits only
     // for the final prompt token so generation starts from the correct position.
-    constexpr int32_t batchCapacity = 32;
+    constexpr int32_t batchCapacity = 8;
     size_t offset = 0;
     while (offset < tokens.size()) {
         const size_t count = std::min<size_t>(batchCapacity, tokens.size() - offset);
@@ -121,7 +121,8 @@ Java_com_chtai_assistant_LocalAiEngine_nativeGenerate(JNIEnv * env, jobject,
         if (decodeResult != 0) {
             LOGE("Prompt decode failed at token %zu/%zu (batch size %zu)",
                  offset, tokens.size(), count);
-            return env->NewStringUTF("پردازش ورودی مدل ناموفق شد؛ حافظه یا سازگاری مدل را بررسی کن.");
+            LOGE("Prompt decode failed with code %d at token %zu/%zu (batch size %zu)", decodeResult, offset, tokens.size(), count);
+            return env->NewStringUTF("مدل نتوانست متن را پردازش کند؛ حافظه آزاد گوشی یا سازگاری فایل مدل را بررسی کن.");
         }
         offset += count;
     }
@@ -144,7 +145,7 @@ Java_com_chtai_assistant_LocalAiEngine_nativeGenerate(JNIEnv * env, jobject,
         llama_batch batch = llama_batch_get_one(&next, 1);
         if (llama_decode(state->context, batch) != 0) break;
     }
-    if (output.empty()) output = "مدل پاسخی تولید نکرد. این نسخه Qwen از نوع Base است و برای مکالمه ممکن است کیفیت محدودی داشته باشد.";
+    if (output.empty()) output = "مدل پاسخی تولید نکرد؛ پیام را کوتاه‌تر بفرست یا مدل را دوباره بارگذاری کن.";
     return env->NewStringUTF(output.c_str());
 }
 
