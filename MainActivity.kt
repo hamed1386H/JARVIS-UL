@@ -677,6 +677,9 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
         wakeMode = prefs.getBoolean("wake_mode_enabled", false)
         handleWakeIntent(intent)
         if (wakeMode && !wakePromptPending && !isWakeServiceRunning()) startWakeServiceNow()
+        if (voiceSessionActive && !androidRecognitionActive && !voiceCaptureActive.get()) {
+            android.os.Handler(mainLooper).postDelayed({ if (voiceSessionActive && activityVisible) beginListening() }, 500)
+        }
     }
 
     override fun onNewIntent(intent: Intent?) {
@@ -2226,7 +2229,9 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
 
     override fun onRequestPermissionsResult(requestCode: Int, permissions: Array<out String>, grantResults: IntArray) {
         super.onRequestPermissionsResult(requestCode, permissions, grantResults)
-        if (requestCode == requestMic && grantResults.firstOrNull() == PackageManager.PERMISSION_GRANTED) beginListening()
+        if (requestCode == requestMic && grantResults.firstOrNull() == PackageManager.PERMISSION_GRANTED) {
+            if (voiceSessionActive) beginListening() else toggleVoiceConversation()
+        }
         else if (requestCode == requestMic) reply("برای فرمان صوتی باید مجوز میکروفون را بدهی")
         if (requestCode == 104) {
             if (android.os.Build.VERSION.SDK_INT < 33 || ContextCompat.checkSelfPermission(this, Manifest.permission.POST_NOTIFICATIONS) == PackageManager.PERMISSION_GRANTED) startWakeServiceNow()
