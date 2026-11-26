@@ -45,7 +45,7 @@ class PersianCloudTts(context: Context) {
             if (code !in 200..299) {
                 val detail = connection.errorStream?.bufferedReader(Charsets.UTF_8)?.use { it.readText() }.orEmpty()
                 val message = try { JSONObject(detail).optJSONObject("detail")?.optString("message") } catch (_: Exception) { null }
-                throw IllegalStateException("خطای سرویس صدا ($code): ${(message ?: detail).replace(Regex("\\s+"), " ").take(220)}")
+                val safeError = when (code) {\n                    401 -> "کلید سرویس صدا نامعتبر است؛ کلید ElevenLabs را در تنظیمات بررسی کن."\n                    403 -> "دسترسی سرویس صدا رد شد (403). احتمالاً کلید یا سطح دسترسی حساب اجازه ساخت صدا نمی‌دهد؛ کلید را بررسی کن."\n                    429 -> "سهمیه یا محدودیت درخواست سرویس صدا تمام شده؛ کمی بعد دوباره تلاش کن."\n                    else -> "سرویس صدای فارسی پاسخ مناسبی نداد (کد $code)."\n                }\n                throw IllegalStateException(safeError)
             }
             val file = File.createTempFile("jarvis-fa-", ".mp3")
             connection.inputStream.use { input -> file.outputStream().buffered(65536).use { output -> input.copyTo(output) } }
