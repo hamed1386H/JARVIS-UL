@@ -19,6 +19,27 @@ android {
     externalNativeBuild {
         cmake { path 'src/main/cpp/CMakeLists.txt'; version '3.22.1' }
     }
+
+    // If a persistent signing key is supplied through GitHub Actions secrets,
+    // use it for debug APKs too so future builds can update the installed app.
+    signingConfigs {
+        stable {
+            def keyPath = System.getenv('JARVIS_KEYSTORE_FILE')
+            if (keyPath != null && !keyPath.isEmpty()) {
+                storeFile file(keyPath)
+                storePassword System.getenv('JARVIS_KEYSTORE_PASSWORD')
+                keyAlias System.getenv('JARVIS_KEY_ALIAS')
+                keyPassword System.getenv('JARVIS_KEY_PASSWORD')
+            }
+        }
+    }
+    buildTypes {
+        debug {
+            if (System.getenv('JARVIS_KEYSTORE_FILE') != null) {
+                signingConfig signingConfigs.stable
+            }
+        }
+    }
 }
 
 dependencies {
