@@ -1,7 +1,6 @@
 #include <jni.h>
 #include <string>
 #include <algorithm>
-#include <vector>
 #include "whisper.h"
 
 extern "C" JNIEXPORT jlong JNICALL
@@ -21,15 +20,15 @@ Java_com_chtai_assistant_WhisperEngine_nativeTranscribe(JNIEnv *env, jobject, jl
     const jsize count = env->GetArrayLength(samples);
     jfloat *audio = env->GetFloatArrayElements(samples, nullptr);
     auto params = whisper_full_default_params(WHISPER_SAMPLING_GREEDY);
-    // Force Persian to skip language detection; use up to four CPU threads on mobile.
+    // Persian is fixed, decoding is greedy, and the short wake-word windows use one segment.
     params.language = "fa";
     params.translate = false;
     params.no_context = true;
-    params.single_segment = false;
+    params.single_segment = true;
     params.print_progress = false;
     params.print_realtime = false;
     params.print_timestamps = false;
-    params.n_threads = threads > 0 ? std::min(threads, 4) : 4;
+    params.n_threads = threads > 0 ? std::min(threads, 6) : 4;
     const int result = whisper_full(ctx, params, audio, count);
     env->ReleaseFloatArrayElements(samples, audio, JNI_ABORT);
     if (result != 0) return env->NewStringUTF("");
