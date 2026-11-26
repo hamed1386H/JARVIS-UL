@@ -6,7 +6,7 @@ import java.io.File
 import java.net.HttpURLConnection
 import java.net.URL
 
-/** Optional Persian cloud TTS. Credentials are stored locally and never embedded in the APK. */
+/** Persian Eleven v3 cloud TTS. Credentials are stored locally and never embedded in the APK. */
 class PersianCloudTts(context: Context) {
     private val prefs = context.getSharedPreferences("jarvis_persian_tts", Context.MODE_PRIVATE)
     fun apiKey(): String = prefs.getString("api_key", "") ?: ""
