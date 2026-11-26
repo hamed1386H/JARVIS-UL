@@ -39,7 +39,7 @@ import kotlin.math.roundToInt
 class MainActivity : Activity(), TextToSpeech.OnInitListener {
     private lateinit var status: TextView
     private lateinit var orbView: JarvisOrbView
-    private var autoMicStarted = false
+    private val voiceCaptureActive = java.util.concurrent.atomic.AtomicBoolean(false)
     private lateinit var log: TextView
     private lateinit var input: EditText
     private lateinit var tts: TextToSpeech
@@ -463,11 +463,7 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
         activityVisible = true
         updatePermissionStatus()
         scanGrantedDownloadFolder()
-        if (!autoMicStarted) {
-            autoMicStarted = true
-            if (ContextCompat.checkSelfPermission(this, Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED) beginListening()
-            else ActivityCompat.requestPermissions(this, arrayOf(Manifest.permission.RECORD_AUDIO), requestMic)
-        }
+        // Push-to-talk only: never start microphone capture automatically on resume.
     }
 
     override fun onPause() {
@@ -489,6 +485,7 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
 
     private fun captureAndTranscribe() {
         if (!activityVisible || !whisper.isLoaded()) return
+        if (!voiceCaptureActive.compareAndSet(false, true)) return
         status.text = "JARVIS گوش می‌دهد…"; orbView.setMode(JarvisOrbView.Mode.LISTENING)
         voiceExecutor.execute {
             var recorder: AudioRecord? = null
@@ -518,7 +515,11 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
                 val words = whisper.transcribe(audio)
                 runOnUiThread { if (words.isNotBlank()) { addLog("شما", words); handleCommand(words) } else { status.text = "متوجه صحبتت نشدم؛ دوباره بگو"; orbView.setMode(JarvisOrbView.Mode.IDLE) } }
             } catch (e: Exception) { runOnUiThread { reply("تشخیص صدای Whisper ناموفق بود: " + (e.message ?: "خطای ناشناخته")) } }
-            finally { try { recorder?.release() } catch (_: Exception) {}; runOnUiThread { orbView.setAudioLevel(0f) } }
+            finally {
+                try { recorder?.release() } catch (_: Exception) {}
+                voiceCaptureActive.set(false)
+                runOnUiThread { if (::orbView.isInitialized) orbView.setAudioLevel(0f) }
+            }
         }
     }
     private fun autoLoadWhisperModel() {
@@ -1458,37 +1459,47 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
     }
 
     private fun askLocal(prompt: String) {
-        // Local-first mode: never require or automatically call a remote API.
-        if (!prefs.getBoolean("local_ai_enabled", true)) {
-            reply("هوش مصنوعی خاموش است. از تنظیمات JARVIS آن را فعال کن؛ فرمان‌های پایه همچنان کار می‌کنند.")
+        val onlineConfigured = agentCore.isOnlineConfigured()
+        val localEnabled = prefs.getBoolean("local_ai_enabled", true)
+        if (!onlineConfigured && (!localEnabled || !localAi.isLoaded())) {
+            reply("برای گفت‌وگو باید اتصال هوش آنلاین را در تنظیمات وارد کنی یا مدل محلی را دانلود و فعال کنی.")
             return
         }
-        if (!localAi.isLoaded()) {
-            reply("مغز هوشمند هنوز آماده نیست. از تنظیمات JARVIS دانلود و فعال‌سازی مدل اصلی را انتخاب کن.")
-            return
-        }
-        status.text = "در حال فکر کردن روی گوشی…"; orbView.setMode(JarvisOrbView.Mode.THINKING)
+        status.text = if (onlineConfigured) "در حال اتصال امن به دستیار آنلاین…" else "در حال فکر کردن روی گوشی…"
+        orbView.setMode(JarvisOrbView.Mode.THINKING)
         executor.execute {
             try {
-                val promptBuilder = StringBuilder()
-                promptBuilder.append("<|im_start|>system\n/no_think\n")
-                    .append("تو JARVIS هستی؛ دستیار چندزبانه، دوستانه، دقیق و مسئولیت‌پذیر. زبان پیام فعلی کاربر را خودکار تشخیص بده و پاسخ را به همان زبان بنویس؛ اگر پیام ترکیبی است زبان غالب را انتخاب کن. فارسی را با املای روان و طبیعی بنویس. برای متن‌های کوتاه، غلط‌دار یا محاوره‌ای هم زبان را از بافت تشخیص بده. پاسخ را مستقیم و کاربردی نگه دار و اگر چیزی را نمی‌دانی صادقانه بگو.\n" +
-                        "فرمان‌های واقعی فعلی فقط این‌ها هستند: باز کردن یک برنامه با نام آن؛ باز کردن پنل Wi-Fi؛ باز کردن تنظیمات Bluetooth؛ باز کردن تنظیمات باتری؛ روشن یا خاموش کردن چراغ‌قوه؛ تنظیم درصد روشنایی؛ تنظیم درصد صدای رسانه؛ باز کردن تنظیمات مزاحم نشو.\n" +
-                        "اگر کاربر فقط سؤال یا گفت‌وگوی عادی دارد، پاسخ متنی طبیعی بده. اگر واقعاً درخواست اجرای یکی از فرمان‌های پشتیبانی‌شده را دارد، فقط یک JSON معتبر با قالب {\"type\":\"action\",\"command\":\"فرمان کوتاه فارسی\"} تولید کن و هیچ متن دیگری اضافه نکن. برای هر قابلیت دیگر بگو هنوز پیاده‌سازی نشده است. هرگز ادعا نکن کاری انجام شده؛ اجرای فرمان فقط پس از تأیید کاربر انجام می‌شود.\n<|im_end|>\n")
-                val first = (conversation.length() - 6).coerceAtLeast(0)
-                for (i in first until conversation.length()) {
-                    val item = conversation.getJSONObject(i)
-                    val role = item.optString("role", "user")
-                    val content = item.optString("content", "").takeLast(700)
-                    promptBuilder.append("<|im_start|>").append(role).append("\n").append(content).append("<|im_end|>\n")
+                val historyText = buildString {
+                    val first = (conversation.length() - 8).coerceAtLeast(0)
+                    for (i in first until conversation.length()) {
+                        val item = conversation.optJSONObject(i) ?: continue
+                        val role = item.optString("role", "user")
+                        val content = item.optString("content", "").takeLast(900)
+                        append(if (role == "assistant") "JARVIS: " else "کاربر: ")
+                        append(content).append("\\n")
+                    }
                 }
-                promptBuilder.append("<|im_start|>user\n").append(prompt.take(1200)).append("<|im_end|>\n<|im_start|>assistant\n/no_think\n")
-                val answer = localAi.generate(promptBuilder.toString(), 128).trim()
-                    .replace(Regex("<think>[\\s\\S]*?</think>"), "").trim()
+                val answer = if (onlineConfigured) {
+                    try {
+                        agentCore.askOnline(
+                            "تاریخچه کوتاه گفتگو:\\n$historyText\\nپیام جدید کاربر:\\n${prompt.take(4000)}"
+                        ).trim()
+                    } catch (onlineError: Exception) {
+                        if (!localEnabled || !localAi.isLoaded()) throw onlineError
+                        runOnUiThread { status.text = "اتصال آنلاین ناموفق؛ تلاش با مدل محلی…" }
+                        val localPrompt = agentCore.buildLocalPrompt(prompt, conversation)
+                        localAi.generate(localPrompt, 220).trim()
+                    }
+                } else {
+                    val localPrompt = agentCore.buildLocalPrompt(prompt, conversation)
+                    localAi.generate(localPrompt, 220).trim()
+                }
+                val cleaned = answer.replace(Regex("<think>[\\s\\S]*?</think>"), "").trim()
+                if (cleaned.isBlank()) throw IllegalStateException("پاسخ دستیار خالی بود.")
                 runOnUiThread {
                     addLog("شما", prompt)
                     addConversationMessage("user", prompt)
-                    val action = parseAiAction(answer)
+                    val action = parseAiAction(cleaned)
                     if (action != null) {
                         val command = action.optString("command", "").trim()
                         if (isAllowedAiCommand(command)) {
@@ -1498,21 +1509,22 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
                             confirmAiAction(command)
                         } else {
                             val message = "این فرمان در فهرست عملیات امن و پشتیبانی‌شده نیست؛ اجرا نشد."
-                            addLog("JARVIS", message); addConversationMessage("assistant", message); speak(message)
+                            addLog("JARVIS", message)
+                            addConversationMessage("assistant", message)
+                            speak(message)
                         }
                     } else {
-                        addLog("JARVIS", answer)
-                        addConversationMessage("assistant", answer)
-                        status.text = "پاسخ محلی آماده شد"
-                        speak(answer)
+                        addLog("JARVIS", cleaned)
+                        addConversationMessage("assistant", cleaned)
+                        status.text = if (onlineConfigured) "پاسخ دستیار آنلاین آماده شد" else "پاسخ محلی آماده شد"
+                        speak(cleaned)
                     }
                 }
             } catch (e: Exception) {
-                runOnUiThread { reply("خطای هوش مصنوعی محلی: ${e.message ?: "خطای ناشناخته"}") }
+                runOnUiThread { reply("پاسخ‌گویی ناموفق بود: ${e.message ?: "خطای ناشناخته"}") }
             }
         }
     }
-
 
     private fun parseAiAction(raw: String): JSONObject? {
         return try {
@@ -1588,7 +1600,7 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
                 override fun onDone(utteranceId: String?) {
                     runOnUiThread {
                         if (::orbView.isInitialized) { orbView.setAudioLevel(0f); orbView.setMode(JarvisOrbView.Mode.IDLE) }
-                        if (activityVisible && whisper.isLoaded()) captureAndTranscribe()
+                        // Do not reopen the microphone after speech: prevents JARVIS hearing its own TTS.
                     }
                 }
                 override fun onError(utteranceId: String?) {
