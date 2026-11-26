@@ -20,7 +20,9 @@ class WhisperEngine {
     @Synchronized fun isLoaded() = handle != 0L
     @Synchronized fun transcribe(samples: FloatArray): String {
         check(handle != 0L) { "مدل تشخیص گفتار هنوز بارگذاری نشده است." }
-        return nativeTranscribe(handle, samples, 4).trim()
+        // Use the available CPU cores without oversubscribing a mobile device.
+        val threads = Runtime.getRuntime().availableProcessors().coerceIn(2, 6)
+        return nativeTranscribe(handle, samples, threads).trim()
     }
     @Synchronized fun unload() {
         val h = handle
