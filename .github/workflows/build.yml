@@ -43,6 +43,15 @@ jobs:
           cp -R launcher-res/. jarvis-source/app/src/main/res/
           sed -i 's/<application/<application android:icon="@mipmap\/ic_launcher" android:roundIcon="@mipmap\/ic_launcher_round"/' jarvis-source/app/src/main/AndroidManifest.xml
           sed -i '/<manifest/a\    <uses-permission android:name="android.permission.READ_CONTACTS" />' jarvis-source/app/src/main/AndroidManifest.xml
+          python3 - <<'PY'
+          from pathlib import Path
+          p = Path('jarvis-source/app/src/main/AndroidManifest.xml')
+          s = p.read_text()
+          q = '    <queries>\\n        <intent>\\n            <action android:name="android.speech.RecognitionService" />\\n        </intent>\\n    </queries>\\n'
+          if '<action android:name="android.speech.RecognitionService"' not in s:
+              s = s.replace('</manifest>', q + '</manifest>')
+              p.write_text(s)
+          PY
 
       - name: Set up Java 17
         uses: actions/setup-java@v4
