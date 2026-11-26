@@ -86,10 +86,13 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
     }
     private var modelReceiverRegistered = false
     private var wakeReceiverRegistered = false
+    @Volatile private var wakePromptPending = false
+    @Volatile private var wakeCommandInProgress = false
     private val wakeDetectedReceiver = object : BroadcastReceiver() {
         override fun onReceive(context: Context?, intent: Intent?) {
             if (intent?.action == WakeWordService.ACTION_WAKE_DETECTED && activityVisible) {
-                reply("در خدمتم")
+                wakePromptPending = true
+                reply("در خدمتم، بگو چه کاری انجام بدهم")
             }
         }
     }
@@ -1055,8 +1058,10 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
 
     private fun toggleWakeMode() {
         if (isWakeServiceRunning()) {
+            wakeMode = false
+            prefs.edit().putBoolean("wake_mode_enabled", false).apply()
             stopService(Intent(this, WakeWordService::class.java))
-            reply("سرویس گوش‌به‌زنگ متوقف شد")
+            reply("گوش‌به‌زنگ خاموش شد")
             return
         }
         if (ContextCompat.checkSelfPermission(this, Manifest.permission.RECORD_AUDIO) != PackageManager.PERMISSION_GRANTED) {
@@ -1072,9 +1077,13 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
 
     private fun startWakeServiceNow() {
         try {
+            wakeMode = true
+            prefs.edit().putBoolean("wake_mode_enabled", true).apply()
             ContextCompat.startForegroundService(this, Intent(this, WakeWordService::class.java))
-            reply("گوش‌به‌زنگ فعال شد؛ اعلان دائمی JARVIS نمایش داده می‌شود")
+            status.text = "گوش‌به‌زنگ فعال است؛ بگو جارویس"
         } catch (_: Exception) {
+            wakeMode = false
+            prefs.edit().putBoolean("wake_mode_enabled", false).apply()
             reply("فعال‌سازی سرویس ممکن نشد؛ مجوز میکروفون، اعلان و محدودیت باتری را بررسی کن")
         }
     }
@@ -1907,13 +1916,28 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
                 override fun onDone(utteranceId: String?) {
                     runOnUiThread {
                         if (::orbView.isInitialized) { orbView.setAudioLevel(0f); setJarvisMode(JarvisOrbView.Mode.IDLE) }
-                        // Do not reopen the microphone after speech: prevents JARVIS hearing its own TTS.
+                        if (wakePromptPending && activityVisible && !isFinishing) {
+                            wakePromptPending = false
+                            wakeCommandInProgress = true
+                            beginListening()
+                        } else if (wakeMode && activityVisible && !isFinishing) {
+                            wakeCommandInProgress = false
+                            startWakeServiceNow()
+                        }
                     }
                 }
                 override fun onError(utteranceId: String?) {
                     runOnUiThread {
                         if (::orbView.isInitialized) { orbView.setAudioLevel(0f); setJarvisMode(JarvisOrbView.Mode.IDLE) }
                         status.text = "موتور گفتار نتوانست صدا را پخش کند؛ صدای فارسی گوشی را بررسی کن."
+                        if (wakePromptPending && activityVisible && !isFinishing) {
+                            wakePromptPending = false
+                            wakeCommandInProgress = true
+                            beginListening()
+                        } else if (wakeMode && activityVisible && !isFinishing) {
+                            wakeCommandInProgress = false
+                            startWakeServiceNow()
+                        }
                     }
                 }
                 override fun onError(utteranceId: String?, errorCode: Int) {
@@ -1932,11 +1956,14 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
             })
             var result = tts.setLanguage(Locale.forLanguageTag("fa-IR"))
             if (result < TextToSpeech.LANG_AVAILABLE) result = tts.setLanguage(Locale("fa"))
-            val persianVoices = try { tts.voices?.filter { it.locale.language == "fa" && !it.isNetworkConnectionRequired }.orEmpty() } catch (_: Exception) { emptyList() }
+            val persianVoices = try { tts.voices?.filter { it.locale.language == "fa" }.orEmpty() } catch (_: Exception) { emptyList() }
             val savedVoice = prefs.getString("tts_voice", "")
             val selectedPersianVoice = persianVoices.firstOrNull { it.name == savedVoice }
                 ?: persianVoices.maxByOrNull { it.quality }
-            if (selectedPersianVoice != null) tts.setVoice(selectedPersianVoice)
+            if (selectedPersianVoice != null) {
+                val voiceResult = try { tts.setVoice(selectedPersianVoice) } catch (_: Exception) { TextToSpeech.ERROR }
+                if (voiceResult == TextToSpeech.SUCCESS) result = TextToSpeech.LANG_AVAILABLE
+            }
             // Do not require an explicitly enumerated Persian Voice: some Android TTS engines
             // support fa-IR through setLanguage while exposing an empty voices list.
             ttsReady = result >= TextToSpeech.LANG_AVAILABLE
