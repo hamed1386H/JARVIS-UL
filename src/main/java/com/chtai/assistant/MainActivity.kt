@@ -44,6 +44,7 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
     private lateinit var input: EditText
     private lateinit var tts: TextToSpeech
     private var ttsReady = false
+    @Volatile private var pendingSpeech = ""
     private var wakeMode = false
     private val executor = Executors.newSingleThreadExecutor()
     // Keep continuous microphone capture/transcription off the AI/model worker queue.
@@ -68,6 +69,7 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
     private val PREF_DOWNLOAD_TREE = "jarvis_download_tree_uri"
     private val whisperModelFile by lazy { java.io.File(getExternalFilesDir(Environment.DIRECTORY_DOWNLOADS) ?: filesDir, WHISPER_MODEL_FILENAME) }
     @Volatile private var activityVisible = false
+    @Volatile private var voiceCaptureActive = false
     private val requestLocalModel = 105
     private val localModelFile by lazy {
         val base = getExternalFilesDir(Environment.DIRECTORY_DOWNLOADS) ?: java.io.File(filesDir, "models")
@@ -226,9 +228,16 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
         composer.addView(input, LinearLayout.LayoutParams(0, -2, 1f))
         composer.addView(actionButton("◉", "شروع صحبت با میکروفون") { beginListening() },
             LinearLayout.LayoutParams(dp(52), dp(48)).apply { marginEnd = dp(8) })
+        input.setOnEditorActionListener { _, actionId, event ->
+            val enterPressed = event?.keyCode == android.view.KeyEvent.KEYCODE_ENTER &&
+                event.action == android.view.KeyEvent.ACTION_UP
+            if (actionId == android.view.inputmethod.EditorInfo.IME_ACTION_SEND || enterPressed) {
+                submitTypedMessage()
+                true
+            } else false
+        }
         composer.addView(actionButton("➤", "ارسال پیام") {
-            val q = input.text.toString().trim()
-            if (q.isNotEmpty()) { input.setText(""); handleCommand(q) }
+            submitTypedMessage()
         }, LinearLayout.LayoutParams(dp(52), dp(48)))
         val quickActions = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
@@ -247,7 +256,7 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
     private fun glass(fill: Int, stroke: Int, radiusDp: Int): android.graphics.drawable.GradientDrawable = android.graphics.drawable.GradientDrawable().apply { setColor(fill); cornerRadius = dp(radiusDp).toFloat(); setStroke(dp(1), stroke) }
     private fun showJarvisSettings() {
         val items = arrayOf(
-            "دانلود و فعال‌سازی مغز هوشمند JARVIS (Qwen3-4B)",
+            "دانلود و فعال‌سازی مغز هوشمند JARVIS (Qwen3-1.7B)",
             "انتخاب فایل مدل GGUF دیگر",
             "تخلیه مدل از حافظه",
             "روشن / خاموش کردن هوش مصنوعی محلی",
@@ -310,6 +319,13 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
         setPadding(dp(8), dp(5), dp(8), dp(5))
         contentDescription = content
         setOnClickListener { action() }
+    }
+
+    private fun submitTypedMessage() {
+        val message = input.text?.toString()?.trim().orEmpty()
+        if (message.isBlank()) return
+        input.setText("")
+        handleCommand(message)
     }
 
     private fun addLog(who: String, message: String) {
@@ -456,6 +472,8 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
             autoMicStarted = true
             if (ContextCompat.checkSelfPermission(this, Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED) beginListening()
             else ActivityCompat.requestPermissions(this, arrayOf(Manifest.permission.RECORD_AUDIO), requestMic)
+        } else if (whisper.isLoaded() && !voiceCaptureActive) {
+            captureAndTranscribe()
         }
     }
 
@@ -477,7 +495,8 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
     }
 
     private fun captureAndTranscribe() {
-        if (!activityVisible || !whisper.isLoaded()) return
+        if (!activityVisible || !whisper.isLoaded() || voiceCaptureActive) return
+        voiceCaptureActive = true
         status.text = "JARVIS گوش می‌دهد…"; orbView.setMode(JarvisOrbView.Mode.LISTENING)
         voiceExecutor.execute {
             var recorder: AudioRecord? = null
@@ -503,11 +522,35 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
                 recorder.stop()
                 val audio = FloatArray(samples.size) { samples[it] }
                 runOnUiThread { orbView.setAudioLevel(0f); orbView.setMode(JarvisOrbView.Mode.THINKING); status.text = "در حال تشخیص فارسی با Whisper…" }
-                if (audio.size < rate / 2) { runOnUiThread { status.text = "صدایی دریافت نشد؛ دوباره صحبت کن"; orbView.setMode(JarvisOrbView.Mode.IDLE) }; return@execute }
+                if (audio.size < rate / 2) {
+                    runOnUiThread {
+                        status.text = "صدایی دریافت نشد؛ دوباره صحبت کن"
+                        orbView.setMode(JarvisOrbView.Mode.IDLE)
+                        window.decorView.postDelayed({ if (activityVisible && whisper.isLoaded()) captureAndTranscribe() }, 600)
+                    }
+                    return@execute
+                }
                 val words = whisper.transcribe(audio)
-                runOnUiThread { if (words.isNotBlank()) { addLog("شما", words); handleCommand(words) } else { status.text = "متوجه صحبتت نشدم؛ دوباره بگو"; orbView.setMode(JarvisOrbView.Mode.IDLE) } }
-            } catch (e: Exception) { runOnUiThread { reply("تشخیص صدای Whisper ناموفق بود: " + (e.message ?: "خطای ناشناخته")) } }
-            finally { try { recorder?.release() } catch (_: Exception) {}; runOnUiThread { orbView.setAudioLevel(0f) } }
+                runOnUiThread {
+                    if (words.isNotBlank()) {
+                        addLog("شما", words)
+                        handleCommand(words)
+                    } else {
+                        status.text = "متوجه صحبتت نشدم؛ دوباره تلاش می‌کنم"
+                        orbView.setMode(JarvisOrbView.Mode.IDLE)
+                        window.decorView.postDelayed({ if (activityVisible && whisper.isLoaded()) captureAndTranscribe() }, 600)
+                    }
+                }
+            } catch (e: Exception) {
+                runOnUiThread {
+                    reply("تشخیص صدای Whisper ناموفق بود: " + (e.message ?: "خطای ناشناخته"))
+                    window.decorView.postDelayed({ if (activityVisible && whisper.isLoaded()) captureAndTranscribe() }, 1200)
+                }
+            } finally {
+                try { recorder?.release() } catch (_: Exception) {}
+                voiceCaptureActive = false
+                runOnUiThread { orbView.setAudioLevel(0f) }
+            }
         }
     }
     private fun autoLoadWhisperModel() {
@@ -639,7 +682,7 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
                     temp.outputStream().buffered(1024 * 1024).use { output -> input.copyTo(output, 1024 * 1024) }
                 } ?: throw IllegalStateException("فایل دانلودشده قابل خواندن نیست")
                 if (kind == "qwen") {
-                    require(temp.length() > 2_000_000_000L) { "فایل GGUF هنوز کامل دانلود نشده است" }
+                    require(temp.length() > 1_000_000_000L) { "فایل GGUF هنوز کامل دانلود نشده است" }
                     temp.inputStream().use { stream ->
                         val magic = ByteArray(4)
                         require(stream.read(magic) == 4 && String(magic, Charsets.US_ASCII) == "GGUF") { "فایل دانلودشده GGUF نیست" }
@@ -1188,14 +1231,14 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
             status.text = "دانلود مدل JARVIS در پس‌زمینه ادامه دارد؛ اعلان دانلود را بررسی کن."
             return
         }
-        if (localModelFile.exists() && isValidGguf(localModelFile, 2_000_000_000L)) {
+        if (localModelFile.exists() && isValidGguf(localModelFile, 1_000_000_000L)) {
             if (!localAi.isLoaded()) loadLocalModel(localModelFile)
             else reply("مغز هوشمند JARVIS از قبل فعال است.")
             return
         }
         showModelDownloadDialog(
             title = "دریافت مغز هوشمند JARVIS",
-            description = "مدل Qwen3-4B-Instruct حدود ۲٫۵ گیگابایت است. لینک مستقیم فایل رسمی Hugging Face باز می‌شود. برای دانلود کامل فضای خالی کافی داشته باش و نام فایل را تغییر نده. پس از دانلود، فایل را از گزینه انتخاب فایل مدل وارد کن.",
+            description = "مدل Qwen3-1.7B با حجم تقریبی حدود ۱ تا ۱٫۳ گیگابایت برای گوشی مناسب‌تر است. لینک مستقیم فایل GGUF باز می‌شود؛ برای دانلود و بارگذاری، فضای خالی کافی داشته باش و نام فایل را تغییر نده.",
             url = MODEL_URL,
             fileName = MODEL_FILENAME,
             isWhisper = false
@@ -1249,7 +1292,7 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
             val manager = getSystemService(Context.DOWNLOAD_SERVICE) as DownloadManager
             val request = DownloadManager.Request(Uri.parse(MODEL_URL))
                 .setTitle("دانلود مغز هوشمند JARVIS")
-                .setDescription("دریافت مدل Qwen3-4B-Instruct؛ حدود ۲.۵ گیگابایت")
+                .setDescription("دریافت مدل Qwen3-1.7B؛ حدود ۱ تا ۱.۳ گیگابایت")
                 .setMimeType("application/octet-stream")
                 .setAllowedOverMetered(true)
                 .setAllowedOverRoaming(false)
@@ -1279,7 +1322,7 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
                 if (!successful && reasonIndex >= 0) reason = "دانلود با خطا متوقف شد (کد ${it.getInt(reasonIndex)})."
             }
         }
-        if (successful && isValidGguf(localModelFile, 2_000_000_000L)) {
+        if (successful && isValidGguf(localModelFile, 1_000_000_000L)) {
             prefs.edit().putString("local_model_path", localModelFile.absolutePath).putBoolean("local_ai_enabled", true).remove(KEY_MODEL_DOWNLOAD_ID).apply()
             reply("دانلود مدل کامل شد. در حال بارگذاری مغز هوشمند روی گوشی…")
             loadLocalModel(localModelFile)
@@ -1304,7 +1347,7 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
         status.text = "در حال بارگذاری مدل محلی روی گوشی…"
         executor.execute {
             try {
-                localAi.load(file.absolutePath, 3, 2048)
+                localAi.load(file.absolutePath, 2, 1536)
                 prefs.edit().putString("local_model_path", file.absolutePath).putBoolean("local_ai_enabled", true).apply()
                 runOnUiThread { status.text = "مغز هوشمند JARVIS فعال است؛ پردازش کاملاً محلی"; addLog("JARVIS", "مدل Qwen روی گوشی بارگذاری و آماده شد.") }
             } catch (e: Exception) {
@@ -1322,12 +1365,14 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
             status.text = "دانلود مغز هوشمند JARVIS در پس‌زمینه ادامه دارد."
             return
         }
+        // Always prefer the phone-sized 1.7B model. Never auto-load an older
+        // 4B/other saved model: it can exhaust Android's app memory during inference.
         val savedPath = prefs.getString("local_model_path", "") ?: ""
         val savedFile = if (savedPath.isNotBlank()) java.io.File(savedPath) else null
-        val isOldWeakModel = savedFile?.name?.contains("0.6b", ignoreCase = true) == true
         val file = when {
-            isValidGguf(localModelFile, 2_000_000_000L) -> localModelFile
-            savedFile != null && savedFile.isFile && !isOldWeakModel -> savedFile
+            isValidGguf(localModelFile, 1_000_000_000L) -> localModelFile
+            savedFile != null && savedFile.isFile &&
+                savedFile.name == MODEL_FILENAME && isValidGguf(savedFile, 1_000_000_000L) -> savedFile
             else -> localModelFile
         }
         if (isValidGguf(file)) {
@@ -1341,7 +1386,7 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
     private fun selectLocalModel() {
         AlertDialog.Builder(this)
             .setTitle("انتخاب مدل هوش مصنوعی محلی")
-            .setMessage("یک فایل GGUF سازگار انتخاب کن. مدل اصلی پیشنهادی JARVIS، Qwen3-4B-Instruct-2507 با کوانت Q4_K_M است. مدل‌های دیگر هم در صورت سازگاری با llama.cpp قابل آزمایش‌اند.")
+            .setMessage("یک فایل GGUF سازگار انتخاب کن. مدل پیشنهادی برای گوشی، Qwen3-1.7B با کوانت Q4_K_M است. مدل‌های دیگر هم در صورت سازگاری با llama.cpp قابل آزمایش‌اند.")
             .setPositiveButton("انتخاب فایل مدل") { _, _ ->
                 val intent = Intent(Intent.ACTION_OPEN_DOCUMENT).apply {
                     addCategory(Intent.CATEGORY_OPENABLE)
@@ -1373,7 +1418,7 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
                 check(temporaryFile.renameTo(localModelFile)) { "ذخیره نهایی فایل مدل ناموفق بود." }
                 runOnUiThread { status.text = "فایل ذخیره شد؛ در حال بارگذاری موتور هوش مصنوعی…" }
                 check(LocalAiEngine.isNativeAvailable()) { "کتابخانه موتور llama.cpp در APK وجود ندارد. پروژه باید با NDK کامپایل شود." }
-                localAi.load(localModelFile.absolutePath, 3, 2048)
+                localAi.load(localModelFile.absolutePath, 2, 1536)
                 prefs.edit().putString("local_model_path", localModelFile.absolutePath).putBoolean("local_ai_enabled", true).apply()
                 runOnUiThread { reply("مدل محلی بارگذاری شد. اکنون می‌توانی بدون API با من گفتگو کنی.") }
             } catch (e: Exception) {
@@ -1471,7 +1516,7 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
                     }
                 }
                 try {
-                    val answer = localAi.generate(agentCore.buildLocalPrompt(prompt, conversation), 256).trim()
+                    val answer = localAi.generate(agentCore.buildLocalPrompt(prompt, conversation), 128).trim()
                     runOnUiThread {
                         addLog("شما", prompt); addConversationMessage("user", prompt)
                         addLog("JARVIS • LOCAL", answer); addConversationMessage("assistant", answer)
@@ -1507,7 +1552,7 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
                     promptBuilder.append("<|im_start|>").append(role).append("\n").append(content).append("<|im_end|>\n")
                 }
                 promptBuilder.append("<|im_start|>user\n").append(prompt.take(1200)).append("<|im_end|>\n<|im_start|>assistant\n/no_think\n")
-                val answer = localAi.generate(promptBuilder.toString(), 256).trim()
+                val answer = localAi.generate(promptBuilder.toString(), 128).trim()
                     .replace(Regex("<think>[\\s\\S]*?</think>"), "").trim()
                 runOnUiThread {
                     addLog("شما", prompt)
@@ -1574,12 +1619,28 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
     }
 
     private fun reply(message: String) { status.text = message; addLog("JARVIS", message); speak(message) }
-    private fun speak(message: String) { if (ttsReady) { orbView.setMode(JarvisOrbView.Mode.SPEAKING); tts.speak(message, TextToSpeech.QUEUE_FLUSH, null, "jarvis_reply") } }
+    private fun speak(message: String) {
+        if (message.isBlank()) return
+        if (!ttsReady || !::tts.isInitialized) {
+            pendingSpeech = message
+            return
+        }
+        if (::orbView.isInitialized) orbView.setMode(JarvisOrbView.Mode.SPEAKING)
+        val result = tts.speak(message, TextToSpeech.QUEUE_FLUSH, null, "jarvis_reply")
+        if (result == TextToSpeech.ERROR) {
+            pendingSpeech = message
+            ttsReady = false
+            status.text = "پخش صدا ناموفق بود؛ موتور گفتار گوشی را بررسی کن."
+        }
+    }
 
     override fun onRequestPermissionsResult(requestCode: Int, permissions: Array<out String>, grantResults: IntArray) {
         super.onRequestPermissionsResult(requestCode, permissions, grantResults)
         if (requestCode == requestMic && grantResults.firstOrNull() == PackageManager.PERMISSION_GRANTED) beginListening()
-        else if (requestCode == requestMic) reply("برای فرمان صوتی باید مجوز میکروفون را بدهی")
+        else if (requestCode == requestMic) {
+            autoMicStarted = false
+            reply("برای فرمان صوتی باید مجوز میکروفون را بدهی")
+        }
         if (requestCode == 104) {
             if (android.os.Build.VERSION.SDK_INT < 33 || ContextCompat.checkSelfPermission(this, Manifest.permission.POST_NOTIFICATIONS) == PackageManager.PERMISSION_GRANTED) startWakeServiceNow()
             else reply("مجوز اعلان داده نشد؛ برای نمایش اعلان دائمی باید آن را از تنظیمات مجاز کنی")
@@ -1623,11 +1684,35 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
                     runOnUiThread { if (::orbView.isInitialized) orbView.setAudioLevel(level) }
                 }
             })
-            val result = tts.setLanguage(Locale("fa", "IR"))
-            ttsReady = result >= TextToSpeech.LANG_AVAILABLE
             val savedVoice = prefs.getString("tts_voice", "")
-            if (!savedVoice.isNullOrBlank()) tts.voices?.firstOrNull { it.name == savedVoice }?.let { tts.setVoice(it) }
-            if (!ttsReady) { tts.setLanguage(Locale.getDefault()); ttsReady = true; status.text = "صدای فارسی نصب نیست؛ زبان پیش‌فرض استفاده می‌شود" }
+            val availableVoices = tts.voices.orEmpty()
+            val saved = availableVoices.firstOrNull { it.name == savedVoice }
+            val persianVoice = availableVoices.firstOrNull { it.locale.language == "fa" }
+            if (saved != null) {
+                ttsReady = tts.setVoice(saved) == TextToSpeech.SUCCESS
+            }
+            if (!ttsReady && persianVoice != null) {
+                ttsReady = tts.setVoice(persianVoice) == TextToSpeech.SUCCESS
+            }
+            if (!ttsReady) {
+                val result = tts.setLanguage(Locale("fa", "IR"))
+                ttsReady = result >= TextToSpeech.LANG_AVAILABLE
+            }
+            if (!ttsReady) {
+                val fallback = tts.setLanguage(Locale.getDefault())
+                ttsReady = fallback >= TextToSpeech.LANG_AVAILABLE
+                if (ttsReady) status.text = "صدای فارسی نصب نیست؛ از صدای پیش‌فرض گوشی استفاده می‌شود"
+            }
+            if (ttsReady) {
+                val queued = pendingSpeech
+                pendingSpeech = ""
+                if (queued.isNotBlank()) speak(queued)
+            } else {
+                status.text = "موتور تبدیل متن به گفتار آماده نیست؛ سرویس گفتار گوشی را نصب یا فعال کن."
+            }
+        } else {
+            ttsReady = false
+            status.text = "راه‌اندازی موتور گفتار ناموفق بود؛ تنظیمات تبدیل متن به گفتار گوشی را بررسی کن."
         }
     }
 
@@ -1652,8 +1737,8 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
         private const val WHISPER_MODEL_FILENAME = "ggml-base-persian-q8_0.bin"
         private const val WHISPER_MODEL_URL = "https://huggingface.co/armantee/whisper-base-persian-ggml/resolve/main/ggml-base-persian-q8_0.bin"
         private const val KEY_WHISPER_DOWNLOAD_ID = "jarvis_whisper_download_id"
-        private const val MODEL_FILENAME = "Qwen3-4B-Instruct-2507-Q4_K_M.gguf"
-        private const val MODEL_URL = "https://huggingface.co/bartowski/Qwen_Qwen3-4B-Instruct-2507-GGUF/resolve/main/Qwen3-4B-Instruct-2507-Q4_K_M.gguf"
+        private const val MODEL_FILENAME = "Qwen3-1.7B-Q4_K_M.gguf"
+        private const val MODEL_URL = "https://huggingface.co/bartowski/Qwen_Qwen3-1.7B-GGUF/resolve/main/Qwen_Qwen3-1.7B-Q4_K_M.gguf"
         private const val KEY_MODEL_DOWNLOAD_ID = "jarvis_model_download_id"
     }
 
