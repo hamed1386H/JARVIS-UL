@@ -36,8 +36,7 @@ class PersianCloudTts(context: Context) {
         try {
             val body = JSONObject()
                 .put("text", safeText)
-                .put("model_id", "eleven_v3")
-                .put("language_code", "fa")
+                .put("model_id", "eleven_multilingual_v2")
                 .put("voice_settings", JSONObject().put("stability", 0.58).put("similarity_boost", 0.82).put("style", 0.25).put("use_speaker_boost", true))
                 .toString()
             connection.outputStream.use { it.write(body.toByteArray(Charsets.UTF_8)) }
