@@ -324,6 +324,8 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
         val message = input.text?.toString()?.trim().orEmpty()
         if (message.isBlank()) return
         input.setText("")
+        addLog("شما", message)
+        addConversationMessage("user", message)
         handleCommand(message)
     }
 
@@ -870,7 +872,12 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
         .replace("ي", "ی").replace("ك", "ک").replace("‌", " ").replace("ؤ", "و").replace("۰", "0").replace("۱", "1").replace("۲", "2").replace("۳", "3").replace("۴", "4").replace("۵", "5").replace("۶", "6").replace("۷", "7").replace("۸", "8").replace("۹", "9")
 
     private fun handleCommand(raw: String) {
-        val q = normalize(raw)
+        val q = normalize(raw).trim()
+        if (q == "جارویس" || q == "هی جارویس" || q == "سلام جارویس" ||
+            q == "جارویس بیدار شو" || q == "جارویس گوش کن") {
+            reply("در خدمتم")
+            return
+        }
         val smsRequest = parseSmsRequest(raw)
         if (smsRequest != null) { beginSmsFlow(smsRequest.first, smsRequest.second); return }
         if (q.contains("پیام بده") || q.contains("پیامک بده") || q.contains("اس ام اس بده")) {
@@ -1497,8 +1504,6 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
                 val cleaned = answer.replace(Regex("<think>[\\s\\S]*?</think>"), "").trim()
                 if (cleaned.isBlank()) throw IllegalStateException("پاسخ دستیار خالی بود.")
                 runOnUiThread {
-                    addLog("شما", prompt)
-                    addConversationMessage("user", prompt)
                     val action = parseAiAction(cleaned)
                     if (action != null) {
                         val command = action.optString("command", "").trim()
