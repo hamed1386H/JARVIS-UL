@@ -15,13 +15,13 @@ class JarvisAgentCore(context: Context) {
 
     fun endpoint(): String = prefs.getString("endpoint", "") ?: ""
     fun apiKey(): String = prefs.getString("api_key", "") ?: ""
-    fun model(): String = prefs.getString("model", "gpt-4o-mini") ?: "gpt-4o-mini"
+    fun model(): String = prefs.getString("model", "fast") ?: "fast"
 
     fun saveConfig(endpoint: String, key: String, model: String) {
         prefs.edit()
             .putString("endpoint", endpoint.trim())
             .putString("api_key", key.trim())
-            .putString("model", model.trim().ifBlank { "gpt-4o-mini" })
+            .putString("model", model.trim().ifBlank { "fast" })
             .apply()
     }
 
@@ -65,7 +65,12 @@ class JarvisAgentCore(context: Context) {
             setRequestProperty("Content-Type", "application/json; charset=utf-8")
             setRequestProperty("Accept", "application/json")
             setRequestProperty("Connection", "close")
-            if (apiKey().isNotBlank()) setRequestProperty("Authorization", "Bearer ${apiKey().trim()}")
+            if (URL(target).host.endsWith(".p.rapidapi.com", ignoreCase = true)) {
+                if (apiKey().isNotBlank()) setRequestProperty("X-RapidAPI-Key", apiKey().trim())
+                setRequestProperty("X-RapidAPI-Host", URL(target).host)
+            } else if (apiKey().isNotBlank()) {
+                setRequestProperty("Authorization", "Bearer ${apiKey().trim()}")
+            }
         }
 
         try {
