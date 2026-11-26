@@ -29,6 +29,9 @@ jobs:
           mkdir -p jarvis-source
           unzip -q JARVIS_v1.3_LocalAI_GitHub.zip -d jarvis-source
 
+      - name: Apply app module build configuration and version
+        run: install -D build.gradle jarvis-source/app/build.gradle
+
       - name: Apply latest in-app voice input implementation
         run: |
           install -D MainActivity.kt jarvis-source/app/src/main/java/com/chtai/assistant/MainActivity.kt
