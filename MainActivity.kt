@@ -82,17 +82,6 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
     private var pendingSmsRecipient = ""
     private var pendingSmsBody = ""
     private var pendingContactAction = "sms"
-    private var smsReceiverRegistered = false
-    private val smsSentAction = "com.chtai.assistant.SMS_SENT"
-    private val smsSentReceiver = object : BroadcastReceiver() {
-        override fun onReceive(context: Context?, intent: Intent?) {
-            if (intent?.action != smsSentAction) return
-            val recipient = intent.getStringExtra("recipient") ?: "مخاطب"
-            val sent = resultCode == Activity.RESULT_OK
-            showResultNotification(if (sent) "پیامک به $recipient ارسال شد" else "ارسال پیامک به $recipient ناموفق بود")
-            if (smsReceiverRegistered) { try { unregisterReceiver(this) } catch (_: Exception) { }; smsReceiverRegistered = false }
-        }
-    }
     private val PREF_DOWNLOAD_TREE = "jarvis_download_tree_uri"
     private val whisperModelFile by lazy { java.io.File(getExternalFilesDir(Environment.DIRECTORY_DOWNLOADS) ?: filesDir, WHISPER_MODEL_FILENAME) }
     @Volatile private var activityVisible = false
@@ -1360,13 +1349,29 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
         try {
             if (action == "call") { startActivity(Intent(Intent.ACTION_CALL, Uri.parse("tel:" + Uri.encode(number)))); showResultNotification("در حال تماس با $name") }
             else {
-                if (!smsReceiverRegistered) { ContextCompat.registerReceiver(this, smsSentReceiver, IntentFilter(smsSentAction), ContextCompat.RECEIVER_NOT_EXPORTED); smsReceiverRegistered = true }
-                val callbackIntent = Intent(smsSentAction).setPackage(packageName).putExtra("recipient", name)
-                val callback = android.app.PendingIntent.getBroadcast(this, System.currentTimeMillis().toInt(), callbackIntent, android.app.PendingIntent.FLAG_UPDATE_CURRENT or android.app.PendingIntent.FLAG_MUTABLE)
-                val manager = getSystemService(android.telephony.SmsManager::class.java) ?: throw IllegalStateException("سرویس پیامک در دسترس نیست")
+                val manager = getSystemService(android.telephony.SmsManager::class.java)
+                    ?: throw IllegalStateException("سرویس پیامک در دسترس نیست")
                 val parts = manager.divideMessage(body)
-                if (parts.size <= 1) manager.sendTextMessage(number, null, body, callback, null) else manager.sendMultipartTextMessage(number, null, parts, ArrayList(java.util.Collections.nCopies(parts.size, callback)), null)
-                reply("پیامک به $name در حال ارسال است.")
+                val batchId = System.currentTimeMillis()
+                val callbacks = ArrayList<android.app.PendingIntent>()
+                for (index in parts.indices) {
+                    val callbackIntent = Intent(this, SmsSentReceiver::class.java)
+                        .setAction(SmsSentReceiver.ACTION_SMS_SENT)
+                        .putExtra(SmsSentReceiver.EXTRA_BATCH_ID, batchId)
+                        .putExtra(SmsSentReceiver.EXTRA_RECIPIENT, name)
+                        .putExtra(SmsSentReceiver.EXTRA_PART_COUNT, parts.size)
+                        .putExtra(SmsSentReceiver.EXTRA_PART_INDEX, index)
+                    callbacks.add(android.app.PendingIntent.getBroadcast(
+                        this, (batchId + index).toInt(), callbackIntent,
+                        android.app.PendingIntent.FLAG_UPDATE_CURRENT or android.app.PendingIntent.FLAG_MUTABLE
+                    ))
+                }
+                if (parts.size <= 1) {
+                    manager.sendTextMessage(number, null, body, callbacks.first(), null)
+                } else {
+                    manager.sendMultipartTextMessage(number, null, parts, callbacks, null)
+                }
+                reply("پیامک به $name در پس‌زمینه در حال ارسال است.")
             }
         } catch (e: Exception) { showResultNotification("انجام عملیات برای $name ناموفق بود: ${e.message ?: "خطای سیستم"}") }
     }
@@ -2162,7 +2167,6 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
     }
 
     override fun onDestroy() {
-        if (smsReceiverRegistered) { try { unregisterReceiver(smsSentReceiver) } catch (_: Exception) { }; smsReceiverRegistered = false }
         if (modelReceiverRegistered) {
             try { unregisterReceiver(modelDownloadReceiver) } catch (_: Exception) { }
             modelReceiverRegistered = false
