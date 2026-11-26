@@ -816,7 +816,7 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
                     runOnUiThread {
                         if (androidRecognitionActive) {
                             setJarvisMode(JarvisOrbView.Mode.THINKING)
-                            status.text = "در حال تبدیل گفتار فارسی به متن…"
+                            status.text = if (voiceSessionActive) "" else "در حال تبدیل گفتار فارسی به متن…"
                         }
                     }
                 }
@@ -969,7 +969,7 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
                             orbView.setAudioLevel(0f)
                             setJarvisMode(JarvisOrbView.Mode.THINKING)
                         }
-                        status.text = "در حال تبدیل صدای فارسی به متن…"
+                        status.text = if (voiceSessionActive) "" else "در حال تبدیل صدای فارسی به متن…"
                     }
                     val words = whisper.transcribe(audio).trim()
                     runOnUiThread {
