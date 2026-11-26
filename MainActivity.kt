@@ -572,7 +572,25 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
                 IntentFilter(WakeWordService.ACTION_WAKE_DETECTED), ContextCompat.RECEIVER_NOT_EXPORTED)
             wakeReceiverRegistered = true
         }
-        // Push-to-talk only: never start microphone capture automatically on resume.
+        wakeMode = prefs.getBoolean("wake_mode_enabled", false)
+        handleWakeIntent(intent)
+        if (wakeMode && !wakePromptPending && !isWakeServiceRunning()) startWakeServiceNow()
+    }
+
+    override fun onNewIntent(intent: Intent?) {
+        super.onNewIntent(intent)
+        setIntent(intent)
+        handleWakeIntent(intent)
+    }
+
+    private fun handleWakeIntent(source: Intent?) {
+        if (source?.getBooleanExtra(EXTRA_WAKE_DETECTED, false) == true) {
+            source.removeExtra(EXTRA_WAKE_DETECTED)
+            if (!wakePromptPending) {
+                wakePromptPending = true
+                if (activityVisible && !isFinishing) reply("بله قربان، گوش می‌دهم.")
+            }
+        }
     }
 
     override fun onPause() {
@@ -2146,6 +2164,7 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
     }
 
     companion object {
+        const val EXTRA_WAKE_DETECTED = "com.chtai.assistant.EXTRA_WAKE_DETECTED"
         private const val WHISPER_MODEL_FILENAME = "ggml-base.bin"
         private const val WHISPER_MODEL_URL = "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-base.bin"
         private const val KEY_WHISPER_DOWNLOAD_ID = "jarvis_whisper_download_id"
