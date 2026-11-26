@@ -34,6 +34,7 @@ jobs:
 
       - name: Apply latest in-app voice input implementation
         run: |
+          install -D AndroidManifest.xml jarvis-source/app/src/main/AndroidManifest.xml
           install -D MainActivity.kt jarvis-source/app/src/main/java/com/chtai/assistant/MainActivity.kt
           install -D PersianCloudTts.kt jarvis-source/app/src/main/java/com/chtai/assistant/PersianCloudTts.kt
           install -D LocalAiEngine.kt jarvis-source/app/src/main/java/com/chtai/assistant/LocalAiEngine.kt
