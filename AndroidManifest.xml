@@ -32,6 +32,7 @@
         android:label="JARVIS"
         android:usesCleartextTraffic="false"
         android:allowBackup="false">
+        <receiver android:name=".SmsSentReceiver" android:exported="false" />
         <service android:name=".WakeWordService" android:exported="false" android:foregroundServiceType="microphone" />
         <activity android:name=".MainActivity" android:exported="true" android:showWhenLocked="true" android:turnScreenOn="true">
             <intent-filter>
