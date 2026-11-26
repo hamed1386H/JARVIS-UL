@@ -1298,7 +1298,7 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
 
     // SMS is deliberately handed to the system messaging app; JARVIS never sends silently.
     private fun parseSmsRequest(raw: String): Pair<String, String>? {
-        val q = normalize(raw).replace(Regex("[،,؛;]+"), " ").replace(Regex("\\s+"), " ").trim()
+        val q = normalize(raw).replace(Regex("[،,؛;]+"), " ").replace(Regex("\s+"), " ").trim()
         val recipientMatch = Regex("""به\s+(.+?)\s+(?:پیام\s*بده|پیامک\s*بده|اس\s*ام\s*اس\s*بده)""").find(q)
             ?: return null
         val recipient = recipientMatch.groupValues[1].trim().trim(',', '،', '.', '!')
@@ -1312,8 +1312,8 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
     }
 
     private fun parseCallRequest(raw: String): String? {
-        val q = normalize(raw).replace(Regex("\\s+"), " ").trim()
-        val patterns = listOf(Regex("""^(?:لطفا\\s+)?به\\s+(.+?)\\s+(?:زنگ\\s+بزن|تماس\\s+بگیر|تلفن\\s+کن)$"""), Regex("""^(?:لطفا\\s+)?با\\s+(.+?)\\s+(?:تماس\\s+بگیر|زنگ\\s+بزن)$"""))
+        val q = normalize(raw).replace(Regex("\s+"), " ").trim()
+        val patterns = listOf(Regex("""^(?:لطفا\s+)?به\s+(.+?)\s+(?:زنگ\s+بزن|تماس\s+بگیر|تلفن\s+کن)$"""), Regex("""^(?:لطفا\s+)?با\s+(.+?)\s+(?:تماس\s+بگیر|زنگ\s+بزن)$"""))
         return patterns.firstNotNullOfOrNull { it.find(q)?.groupValues?.get(1)?.trim() }
     }
 
@@ -1336,7 +1336,7 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
                 val ni = cur.getColumnIndexOrThrow(ContactsContract.CommonDataKinds.Phone.DISPLAY_NAME); val pi = cur.getColumnIndexOrThrow(ContactsContract.CommonDataKinds.Phone.NUMBER)
                 while (cur.moveToNext()) {
                     val name = cur.getString(ni).orEmpty(); val number = cur.getString(pi).orEmpty()
-                    val n = normalize(name).replace(Regex("\\s+"), ""); val t = normalize(recipient).replace(Regex("\\s+"), "")
+                    val n = normalize(name).replace(Regex("\s+"), ""); val t = normalize(recipient).replace(Regex("\s+"), "")
                     val score = when { n == t -> 100; n.startsWith(t) || t.startsWith(n) -> 80; n.contains(t) || t.contains(n) -> 60; else -> 0 }
                     if (score > 0 && number.isNotBlank()) matches.add(Match(name, number, score))
                 }
@@ -1385,7 +1385,7 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
     private fun extractAppLaunchTarget(command: String): String? {
         var q = command.trim()
             .replace(Regex("^(لطفا|لطفاً|خواهشا|خواهشاً|جارویس|jarvis)[،, ]+"), "")
-            .replace(Regex("\\s+"), " ")
+            .replace(Regex("\s+"), " ")
         val openVerbs = listOf("باز کن", "بازکن", "اجرا کن", "اجراکن", "راه اندازی کن", "راه‌اندازی کن", "راه بنداز", "بازش کن", "open", "launch", "start", "run")
         for (verb in openVerbs) {
             if (q.startsWith(verb + " ")) return q.removePrefix(verb).trim()
@@ -1421,7 +1421,7 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
     }
 
     private fun launchAppByName(name: String) {
-        val target = normalize(name).trim().replace(Regex("\\s+"), " ")
+        val target = normalize(name).trim().replace(Regex("\s+"), " ")
         if (target.isBlank()) { reply("نام برنامه را هم بگو"); return }
         val launcher = Intent(Intent.ACTION_MAIN, null).addCategory(Intent.CATEGORY_LAUNCHER)
         val candidates = packageManager.queryIntentActivities(launcher, 0)
@@ -1917,7 +1917,7 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
                     val localPrompt = agentCore.buildLocalPrompt(prompt, conversation)
                     localAi.generate(localPrompt, 220).trim()
                 }
-                val cleaned = answer.replace(Regex("<think>[\\s\\S]*?</think>"), "").trim()
+                val cleaned = answer.replace(Regex("<think>[\s\\S]*?</think>"), "").trim()
                 if (cleaned.isBlank()) throw IllegalStateException("پاسخ دستیار خالی بود.")
                 runOnUiThread {
                     val action = parseAiAction(cleaned)
