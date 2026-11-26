@@ -224,12 +224,15 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
             textDirection = View.TEXT_DIRECTION_FIRST_STRONG_RTL
         }
         composer.addView(input, LinearLayout.LayoutParams(0, -2, 1f))
+        input.setOnEditorActionListener { _, actionId, event ->
+            val sendByIme = actionId == android.view.inputmethod.EditorInfo.IME_ACTION_SEND ||
+                (event?.keyCode == android.view.KeyEvent.KEYCODE_ENTER && event.action == android.view.KeyEvent.ACTION_DOWN)
+            if (sendByIme) { sendTextMessage(); true } else false
+        }
         composer.addView(actionButton("◉", "شروع صحبت با میکروفون") { beginListening() },
             LinearLayout.LayoutParams(dp(52), dp(48)).apply { marginEnd = dp(8) })
-        composer.addView(actionButton("➤", "ارسال پیام") {
-            val q = input.text.toString().trim()
-            if (q.isNotEmpty()) { input.setText(""); handleCommand(q) }
-        }, LinearLayout.LayoutParams(dp(52), dp(48)))
+        composer.addView(actionButton("➤", "ارسال پیام") { sendTextMessage() },
+            LinearLayout.LayoutParams(dp(52), dp(48)))
         val quickActions = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER
@@ -314,6 +317,13 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
 
     private fun addLog(who: String, message: String) {
         log.append("\n\n$who: $message")
+    }
+
+    private fun sendTextMessage() {
+        val message = input.text?.toString()?.trim().orEmpty()
+        if (message.isBlank()) return
+        input.setText("")
+        handleCommand(message)
     }
 
     private fun showPermissionCenter() {
@@ -984,20 +994,23 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
     }
 
     private fun extractAppLaunchTarget(command: String): String? {
-        val openVerbs = listOf("باز کن", "بازکن", "اجرا کن", "اجراکن", "راه اندازی کن", "راه بنداز", "open", "launch", "start", "run")
-        val q = command.trim()
+        var q = command.trim()
+            .replace(Regex("^(لطفا|لطفاً|خواهشا|خواهشاً|جارویس|jarvis)[،, ]+"), "")
+            .replace(Regex("\\s+"), " ")
+        val openVerbs = listOf("باز کن", "بازکن", "اجرا کن", "اجراکن", "راه اندازی کن", "راه‌اندازی کن", "راه بنداز", "بازش کن", "open", "launch", "start", "run")
         for (verb in openVerbs) {
             if (q.startsWith(verb + " ")) return q.removePrefix(verb).trim()
             if (q == verb) return ""
         }
-        val endings = listOf(" را باز کن", " رو باز کن", " را اجرا کن", " رو اجرا کن", " باز کن", " اجرا کن", " را بازکن", " رو بازکن")
+        val endings = listOf(" را برام باز کن", " رو برام باز کن", " را باز کن", " رو باز کن",
+            " را اجرا کن", " رو اجرا کن", " باز کن", " بازکن", " اجرا کن", " راه بنداز", " رو بازش کن", " را بازش کن")
         for (ending in endings) if (q.endsWith(ending)) return q.removeSuffix(ending).trim()
         return null
     }
 
     private fun appAliases(packageName: String): List<String> {
         val aliases = mapOf(
-            "com.instagram.android" to listOf("instagram", "insta", "اینستاگرام", "اینستا", "اینستا گرام"),
+            "com.instagram.android" to listOf("instagram", "insta", "اینستاگرام", "اینستا", "اینستا گرام", "اینستا‌گرام"),
             "com.whatsapp" to listOf("whatsapp", "واتساپ", "واتس اپ", "واتسآپ"),
             "org.telegram.messenger" to listOf("telegram", "تلگرام"),
             "com.google.android.youtube" to listOf("youtube", "you tube", "یوتیوب", "یو تیوب"),
@@ -1304,7 +1317,7 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
         status.text = "در حال بارگذاری مدل محلی روی گوشی…"
         executor.execute {
             try {
-                localAi.load(file.absolutePath, 3, 2048)
+                localAi.load(file.absolutePath, 2, 1024)
                 prefs.edit().putString("local_model_path", file.absolutePath).putBoolean("local_ai_enabled", true).apply()
                 runOnUiThread { status.text = "مغز هوشمند JARVIS فعال است؛ پردازش کاملاً محلی"; addLog("JARVIS", "مدل Qwen روی گوشی بارگذاری و آماده شد.") }
             } catch (e: Exception) {
@@ -1373,7 +1386,7 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
                 check(temporaryFile.renameTo(localModelFile)) { "ذخیره نهایی فایل مدل ناموفق بود." }
                 runOnUiThread { status.text = "فایل ذخیره شد؛ در حال بارگذاری موتور هوش مصنوعی…" }
                 check(LocalAiEngine.isNativeAvailable()) { "کتابخانه موتور llama.cpp در APK وجود ندارد. پروژه باید با NDK کامپایل شود." }
-                localAi.load(localModelFile.absolutePath, 3, 2048)
+                localAi.load(localModelFile.absolutePath, 2, 1024)
                 prefs.edit().putString("local_model_path", localModelFile.absolutePath).putBoolean("local_ai_enabled", true).apply()
                 runOnUiThread { reply("مدل محلی بارگذاری شد. اکنون می‌توانی بدون API با من گفتگو کنی.") }
             } catch (e: Exception) {
@@ -1468,7 +1481,7 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
                     promptBuilder.append("<|im_start|>").append(role).append("\n").append(content).append("<|im_end|>\n")
                 }
                 promptBuilder.append("<|im_start|>user\n").append(prompt.take(1200)).append("<|im_end|>\n<|im_start|>assistant\n/no_think\n")
-                val answer = localAi.generate(promptBuilder.toString(), 256).trim()
+                val answer = localAi.generate(promptBuilder.toString(), 160).trim()
                     .replace(Regex("<think>[\\s\\S]*?</think>"), "").trim()
                 runOnUiThread {
                     addLog("شما", prompt)
