@@ -44,6 +44,7 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
     private lateinit var input: EditText
     private lateinit var tts: TextToSpeech
     private var ttsReady = false
+    @Volatile private var pendingSpeech: String? = null
     private var wakeMode = false
     private val executor = Executors.newSingleThreadExecutor()
     // Keep continuous microphone capture/transcription off the AI/model worker queue.
@@ -649,7 +650,7 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
                     temp.outputStream().buffered(1024 * 1024).use { output -> input.copyTo(output, 1024 * 1024) }
                 } ?: throw IllegalStateException("فایل دانلودشده قابل خواندن نیست")
                 if (kind == "qwen") {
-                    require(temp.length() > 2_000_000_000L) { "فایل GGUF هنوز کامل دانلود نشده است" }
+                    require(temp.length() > 1_000_000_000L) { "فایل GGUF هنوز کامل دانلود نشده است" }
                     temp.inputStream().use { stream ->
                         val magic = ByteArray(4)
                         require(stream.read(magic) == 4 && String(magic, Charsets.US_ASCII) == "GGUF") { "فایل دانلودشده GGUF نیست" }
@@ -1201,14 +1202,14 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
             status.text = "دانلود مدل JARVIS در پس‌زمینه ادامه دارد؛ اعلان دانلود را بررسی کن."
             return
         }
-        if (localModelFile.exists() && isValidGguf(localModelFile, 2_000_000_000L)) {
+        if (localModelFile.exists() && isValidGguf(localModelFile, 1_000_000_000L)) {
             if (!localAi.isLoaded()) loadLocalModel(localModelFile)
             else reply("مغز هوشمند JARVIS از قبل فعال است.")
             return
         }
         showModelDownloadDialog(
             title = "دریافت مغز هوشمند JARVIS",
-            description = "مدل Qwen3-4B-Instruct حدود ۲٫۵ گیگابایت است. لینک مستقیم فایل رسمی Hugging Face باز می‌شود. برای دانلود کامل فضای خالی کافی داشته باش و نام فایل را تغییر نده. پس از دانلود، فایل را از گزینه انتخاب فایل مدل وارد کن.",
+            description = "مدل Qwen3-1.7B با حجم حدود ۱٫۲۸ گیگابایت است. لینک مستقیم فایل رسمی Hugging Face باز می‌شود. برای دانلود کامل فضای خالی کافی داشته باش و نام فایل را تغییر نده. پس از دانلود، فایل را از گزینه انتخاب فایل مدل وارد کن.",
             url = MODEL_URL,
             fileName = MODEL_FILENAME,
             isWhisper = false
@@ -1262,7 +1263,7 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
             val manager = getSystemService(Context.DOWNLOAD_SERVICE) as DownloadManager
             val request = DownloadManager.Request(Uri.parse(MODEL_URL))
                 .setTitle("دانلود مغز هوشمند JARVIS")
-                .setDescription("دریافت مدل Qwen3-4B-Instruct؛ حدود ۲.۵ گیگابایت")
+                .setDescription("دریافت مدل Qwen3-1.7B؛ حدود ۱.۲۸ گیگابایت")
                 .setMimeType("application/octet-stream")
                 .setAllowedOverMetered(true)
                 .setAllowedOverRoaming(false)
@@ -1292,7 +1293,7 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
                 if (!successful && reasonIndex >= 0) reason = "دانلود با خطا متوقف شد (کد ${it.getInt(reasonIndex)})."
             }
         }
-        if (successful && isValidGguf(localModelFile, 2_000_000_000L)) {
+        if (successful && isValidGguf(localModelFile, 1_000_000_000L)) {
             prefs.edit().putString("local_model_path", localModelFile.absolutePath).putBoolean("local_ai_enabled", true).remove(KEY_MODEL_DOWNLOAD_ID).apply()
             reply("دانلود مدل کامل شد. در حال بارگذاری مغز هوشمند روی گوشی…")
             loadLocalModel(localModelFile)
@@ -1317,6 +1318,7 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
         status.text = "در حال بارگذاری مدل محلی روی گوشی…"
         executor.execute {
             try {
+                require(file.length() <= 1_800_000_000L) { "این مدل برای حافظه گوشی سنگین است؛ مدل Qwen3-1.7B را انتخاب کن." }
                 localAi.load(file.absolutePath, 2, 1024)
                 prefs.edit().putString("local_model_path", file.absolutePath).putBoolean("local_ai_enabled", true).apply()
                 runOnUiThread { status.text = "مغز هوشمند JARVIS فعال است؛ پردازش کاملاً محلی"; addLog("JARVIS", "مدل Qwen روی گوشی بارگذاری و آماده شد.") }
@@ -1337,10 +1339,10 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
         }
         val savedPath = prefs.getString("local_model_path", "") ?: ""
         val savedFile = if (savedPath.isNotBlank()) java.io.File(savedPath) else null
-        val isOldWeakModel = savedFile?.name?.contains("0.6b", ignoreCase = true) == true
+        val savedModelIsSafe = savedFile != null && savedFile.isFile && savedFile.length() <= 1_800_000_000L && isValidGguf(savedFile)
         val file = when {
-            isValidGguf(localModelFile, 2_000_000_000L) -> localModelFile
-            savedFile != null && savedFile.isFile && !isOldWeakModel -> savedFile
+            isValidGguf(localModelFile, 1_000_000_000L) -> localModelFile
+            savedModelIsSafe == true -> savedFile!!
             else -> localModelFile
         }
         if (isValidGguf(file)) {
@@ -1354,7 +1356,7 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
     private fun selectLocalModel() {
         AlertDialog.Builder(this)
             .setTitle("انتخاب مدل هوش مصنوعی محلی")
-            .setMessage("یک فایل GGUF سازگار انتخاب کن. مدل اصلی پیشنهادی JARVIS، Qwen3-4B-Instruct-2507 با کوانت Q4_K_M است. مدل‌های دیگر هم در صورت سازگاری با llama.cpp قابل آزمایش‌اند.")
+            .setMessage("یک فایل GGUF سازگار انتخاب کن. مدل اصلی پیشنهادی JARVIS، Qwen3-1.7B با کوانت Q4_K_M است. مدل‌های دیگر هم در صورت سازگاری با llama.cpp قابل آزمایش‌اند.")
             .setPositiveButton("انتخاب فایل مدل") { _, _ ->
                 val intent = Intent(Intent.ACTION_OPEN_DOCUMENT).apply {
                     addCategory(Intent.CATEGORY_OPENABLE)
@@ -1377,7 +1379,7 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
                         source.copyTo(target, 1024 * 1024)
                     }
                 }
-                require(temporaryFile.length() > 100L * 1024L * 1024L) { "حجم فایل برای مدل موردنظر غیرعادی است." }
+                require(temporaryFile.length() in (100L * 1024L * 1024L)..1_800_000_000L) { "برای جلوگیری از کمبود حافظه، مدل GGUF باید حداکثر ۱٫۸ گیگابایت باشد؛ مدل پیشنهادی JARVIS حدود ۱٫۲۸ گیگابایت است." }
                 temporaryFile.inputStream().use { stream ->
                     val magic = ByteArray(4)
                     require(stream.read(magic) == 4 && String(magic, Charsets.US_ASCII) == "GGUF") { "فایل انتخاب‌شده فرمت GGUF ندارد." }
@@ -1409,7 +1411,7 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
         if (enabled) {
             val savedPath = prefs.getString("local_model_path", "") ?: ""
             val savedFile = if (savedPath.isNotBlank()) java.io.File(savedPath) else null
-            val modelFile = if (savedFile != null && savedFile.isFile && !savedFile.name.contains("0.6b", true)) savedFile else localModelFile
+            val modelFile = if (savedFile != null && savedFile.isFile && savedFile.length() <= 1_800_000_000L && isValidGguf(savedFile)) savedFile else localModelFile
             if (modelFile.isFile && isValidGguf(modelFile) && !localAi.isLoaded()) {
                 loadLocalModel(modelFile)
             } else if (localAi.isLoaded()) reply("هوش مصنوعی محلی فعال است.") else promptRecommendedModelDownload()
@@ -1548,7 +1550,13 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
     }
 
     private fun reply(message: String) { status.text = message; addLog("JARVIS", message); speak(message) }
-    private fun speak(message: String) { if (ttsReady) { orbView.setMode(JarvisOrbView.Mode.SPEAKING); tts.speak(message, TextToSpeech.QUEUE_FLUSH, null, "jarvis_reply") } }
+    private fun speak(message: String) {
+        if (!ttsReady) { pendingSpeech = message; return }
+        if (::orbView.isInitialized && ::tts.isInitialized) {
+            orbView.setMode(JarvisOrbView.Mode.SPEAKING)
+            tts.speak(message, TextToSpeech.QUEUE_FLUSH, null, "jarvis_reply")
+        }
+    }
 
     override fun onRequestPermissionsResult(requestCode: Int, permissions: Array<out String>, grantResults: IntArray) {
         super.onRequestPermissionsResult(requestCode, permissions, grantResults)
@@ -1601,7 +1609,12 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
             ttsReady = result >= TextToSpeech.LANG_AVAILABLE
             val savedVoice = prefs.getString("tts_voice", "")
             if (!savedVoice.isNullOrBlank()) tts.voices?.firstOrNull { it.name == savedVoice }?.let { tts.setVoice(it) }
-            if (!ttsReady) { tts.setLanguage(Locale.getDefault()); ttsReady = true; status.text = "صدای فارسی نصب نیست؛ زبان پیش‌فرض استفاده می‌شود" }
+            if (!ttsReady) {
+                val fallback = tts.setLanguage(Locale.getDefault())
+                ttsReady = fallback >= TextToSpeech.LANG_AVAILABLE
+                status.text = if (ttsReady) "صدای فارسی نصب نیست؛ زبان پیش‌فرض استفاده می‌شود" else "موتور گفتار نصب یا آماده نیست؛ پاسخ متنی فعال است"
+            }
+            if (ttsReady) pendingSpeech?.let { queued -> pendingSpeech = null; speak(queued) }
         }
     }
 
@@ -1626,9 +1639,9 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
         private const val WHISPER_MODEL_FILENAME = "ggml-base-q8_0.bin"
         private const val WHISPER_MODEL_URL = "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-base-q8_0.bin"
         private const val KEY_WHISPER_DOWNLOAD_ID = "jarvis_whisper_download_id"
-        private const val MODEL_FILENAME = "Qwen3-4B-Instruct-2507-Q4_K_M.gguf"
-        private const val MODEL_URL = "https://huggingface.co/bartowski/Qwen_Qwen3-4B-Instruct-2507-GGUF/resolve/main/Qwen3-4B-Instruct-2507-Q4_K_M.gguf"
-        private const val KEY_MODEL_DOWNLOAD_ID = "jarvis_model_download_id"
+        private const val MODEL_FILENAME = "Qwen_Qwen3-1.7B-Q4_K_M.gguf"
+        private const val MODEL_URL = "https://huggingface.co/bartowski/Qwen_Qwen3-1.7B-GGUF/resolve/main/Qwen_Qwen3-1.7B-Q4_K_M.gguf"
+        private const val KEY_MODEL_DOWNLOAD_ID = "jarvis_model_download_id_17b"
     }
 
 }
