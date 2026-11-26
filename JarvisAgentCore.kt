@@ -60,8 +60,8 @@ class JarvisAgentCore(context: Context) {
 
         val connection = (URL(target).openConnection() as HttpURLConnection).apply {
             requestMethod = "POST"
-            connectTimeout = 12000
-            readTimeout = 30000
+            connectTimeout = 8000
+            readTimeout = 18000
             doOutput = true
             useCaches = false
             setRequestProperty("Content-Type", "application/json; charset=utf-8")
