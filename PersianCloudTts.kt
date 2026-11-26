@@ -11,15 +11,10 @@ class PersianCloudTts(context: Context) {
     private val prefs = context.getSharedPreferences("jarvis_persian_tts", Context.MODE_PRIVATE)
     fun apiKey(): String = prefs.getString("api_key", "") ?: ""
     fun voiceId(): String {
-        // Never force an English/British preset for Persian speech. Use the phone's
-        // fa-IR TTS voice by default; cloud voice is optional only when the user
-        // explicitly supplies a Persian-compatible ElevenLabs Voice ID.
-        val saved = prefs.getString("voice_id", null)
-        if (saved == "JBFqnCBsd6RMkjVDRZzb" || saved == "pNInz6obpgDQGcFmaJgB") {
-            prefs.edit().putString("voice_id", "").apply()
-            return ""
-        }
-        return saved.orEmpty()
+        // Adam is used as the default male voice. Persian is synthesized with
+        // Eleven v3 (Persian-capable), not the phone's missing fa-IR voice pack.
+        val saved = prefs.getString("voice_id", "").orEmpty().trim()
+        return saved.ifBlank { "pNInz6obpgDQGcFmaJgB" }
     }
     fun saveConfig(key: String, voice: String) {
         prefs.edit().putString("api_key", key.trim()).putString("voice_id", voice.trim()).apply()
@@ -46,7 +41,8 @@ class PersianCloudTts(context: Context) {
         try {
             val body = JSONObject()
                 .put("text", safeText)
-                .put("model_id", "eleven_multilingual_v2")
+                .put("model_id", "eleven_v3")
+                .put("language_code", "fa")
                 .put("voice_settings", JSONObject().put("stability", 0.68).put("similarity_boost", 0.82).put("style", 0.35).put("speed", 0.92).put("use_speaker_boost", true))
                 .toString()
             connection.outputStream.use { it.write(body.toByteArray(Charsets.UTF_8)) }
