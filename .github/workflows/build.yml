@@ -1,5 +1,6 @@
 name: Build JARVIS APK from source ZIP
 # Local AI target: Qwen3-4B-Q4_K_M via llama.cpp; model weights are downloaded separately by the app.
+# RapidAPI support: X-RapidAPI-Key and X-RapidAPI-Host are added by JarvisAgentCore.
 
 on:
   workflow_dispatch:
