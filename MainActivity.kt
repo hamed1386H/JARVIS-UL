@@ -375,6 +375,82 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
             "پاک‌کردن تاریخچه گفتگو" to { clearConversation() },
             "درباره JARVIS" to { showAboutJarvis() }
         ))
+
+        val modesCard = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(dp(13), dp(12), dp(13), dp(12))
+            background = android.graphics.drawable.GradientDrawable(
+                android.graphics.drawable.GradientDrawable.Orientation.TL_BR,
+                intArrayOf(Color.rgb(14, 24, 48), Color.rgb(8, 12, 29))
+            ).apply { cornerRadius = dp(18).toFloat(); setStroke(dp(1), Color.rgb(36, 91, 128)) }
+            elevation = dp(5).toFloat()
+        }
+        modesCard.addView(TextView(this).apply {
+            text = "06  ·  FEATURE SWITCHES"; textSize = 16f; typeface = Typeface.DEFAULT_BOLD
+            setTextColor(Color.rgb(225, 243, 255))
+        })
+        modesCard.addView(TextView(this).apply {
+            text = "قابلیت‌های دائمی را از اینجا روشن یا خاموش کن؛ انتخاب‌ها ذخیره می‌شوند."
+            textSize = 11f; setTextColor(Color.rgb(133, 169, 197))
+            setPadding(0, dp(3), 0, dp(8))
+        })
+        fun addModeSwitch(label: String, description: String, checked: Boolean, onChanged: (Boolean) -> Unit) {
+            val row = LinearLayout(this).apply {
+                orientation = LinearLayout.HORIZONTAL
+                gravity = Gravity.CENTER_VERTICAL
+                setPadding(dp(4), dp(7), dp(2), dp(7))
+            }
+            val texts = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
+            texts.addView(TextView(this).apply {
+                text = label; textSize = 14f; typeface = Typeface.DEFAULT_BOLD
+                setTextColor(Color.rgb(225, 237, 250))
+            })
+            texts.addView(TextView(this).apply {
+                text = description; textSize = 10f; setTextColor(Color.rgb(133, 169, 197))
+            })
+            row.addView(texts, LinearLayout.LayoutParams(0, -2, 1f))
+            val control = Switch(this).apply {
+                isChecked = checked
+                setOnCheckedChangeListener { _, enabled -> onChanged(enabled) }
+            }
+            row.addView(control)
+            modesCard.addView(row, LinearLayout.LayoutParams(-1, -2))
+        }
+        addModeSwitch(
+            "گوش‌به‌زنگ و فرمان بیدارباش",
+            "شنیدن «جارویس» حتی در حالت صفحه‌خاموش",
+            isWakeServiceRunning() || prefs.getBoolean("wake_mode_enabled", false)
+        ) { enabled ->
+            if (enabled) {
+                if (ContextCompat.checkSelfPermission(this, Manifest.permission.RECORD_AUDIO) != PackageManager.PERMISSION_GRANTED ||
+                    (android.os.Build.VERSION.SDK_INT >= 33 && ContextCompat.checkSelfPermission(this, Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED)) {
+                    reply("برای روشن‌کردن گوش‌به‌زنگ، مجوز میکروفون و اعلان را فعال کن.")
+                    prefs.edit().putBoolean("wake_mode_enabled", false).apply()
+                } else startWakeServiceNow()
+            } else {
+                wakeMode = false
+                prefs.edit().putBoolean("wake_mode_enabled", false).apply()
+                stopService(Intent(this, WakeWordService::class.java))
+                status.text = "گوش‌به‌زنگ خاموش شد."
+            }
+        }
+        addModeSwitch(
+            "هوش آنلاین",
+            "استفاده از API تنظیم‌شده برای پاسخ‌گویی",
+            prefs.getBoolean("online_ai_enabled", true)
+        ) { enabled ->
+            prefs.edit().putBoolean("online_ai_enabled", enabled).apply()
+            reply(if (enabled) "هوش آنلاین فعال شد." else "هوش آنلاین خاموش شد؛ در صورت فعال بودن، هوش محلی استفاده می‌شود.")
+        }
+        addModeSwitch(
+            "هوش مصنوعی محلی",
+            "اجازه استفاده از مدل Qwen روی گوشی",
+            prefs.getBoolean("local_ai_enabled", true)
+        ) { enabled ->
+            prefs.edit().putBoolean("local_ai_enabled", enabled).apply()
+            reply(if (enabled) "هوش محلی فعال شد." else "هوش محلی غیرفعال شد.")
+        }
+        root.addView(modesCard, LinearLayout.LayoutParams(-1, -2).apply { bottomMargin = dp(11) })
         AlertDialog.Builder(this).setTitle("JARVIS  ·  Control Center")
             .setView(scroll).setNegativeButton("بستن", null).show()
     }
@@ -2050,7 +2126,7 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
     }
 
     private fun askLocal(prompt: String) {
-        val onlineConfigured = agentCore.isOnlineConfigured()
+        val onlineConfigured = agentCore.isOnlineConfigured() && prefs.getBoolean("online_ai_enabled", true)
         val localEnabled = prefs.getBoolean("local_ai_enabled", true)
         if (!onlineConfigured && (!localEnabled || !localAi.isLoaded())) {
             reply("برای گفت‌وگو باید اتصال هوش آنلاین را در تنظیمات وارد کنی یا مدل محلی را دانلود و فعال کنی.")
