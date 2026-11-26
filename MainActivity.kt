@@ -1525,11 +1525,16 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
         }
         val callRecipient = parseCallRequest(raw)
         if (!callRecipient.isNullOrBlank()) { beginContactAction(callRecipient, "", "call"); return }
+        if ((q.contains("تماس") || q.contains("زنگ") || q.contains("تلفن")) &&
+            (q.contains("بگیر") || q.contains("بزن"))) {
+            reply("نام مخاطب را واضح بگو؛ مثلاً: جارویس، به علی زنگ بزن.")
+            return
+        }
         val smsRequest = parseSmsRequest(raw)
         if (smsRequest != null) { beginContactAction(smsRequest.first, smsRequest.second, "sms"); return }
-        if (q.contains("پیام بده") || q.contains("پیام بفرست") || q.contains("پیام ارسال کن") ||
-            q.contains("پیامک بده") || q.contains("پیامک بفرست") || q.contains("اس ام اس بده") || q.contains("اس ام اس بفرست")) {
-            reply("برای پیام‌دادن بگو: به نام مخاطب پیام بده، بنویس متن پیام"); return
+        if (q.contains("پیام") || q.contains("پیامک") || q.contains("اس ام اس") || q.contains("sms")) {
+            reply("لازم نیست تایپ کنی؛ نام مخاطب و متن پیام را با صدای خودت بگو. مثال: به علی پیام بده، بنویس سلام.")
+            return
         }
         val requestedApp = extractAppLaunchTarget(q)
         if (requestedApp != null) {
@@ -1579,9 +1584,16 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
     }
 
     private fun parseCallRequest(raw: String): String? {
-        val q = normalize(raw).replace(Regex("\\s+"), " ").trim()
-        val patterns = listOf(Regex("""^(?:لطفا\s+)?به\s+(.+?)\s+(?:زنگ\s+بزن|تماس\s+بگیر|تلفن\s+کن)$"""), Regex("""^(?:لطفا\s+)?با\s+(.+?)\s+(?:تماس\s+بگیر|زنگ\s+بزن)$"""))
-        return patterns.firstNotNullOfOrNull { it.find(q)?.groupValues?.get(1)?.trim() }
+        // Strip wake words/fillers and punctuation commonly inserted by Persian speech recognition.
+        val q = normalize(raw).replace(Regex("[،,؛;.!؟?]+"), " ")
+            .replace(Regex("\\s+"), " ").trim()
+            .replace(Regex("^(جارویس|هی جارویس|لطفا|لطفاً|خواهشا|خواهشاً)\\s+"), "")
+        val patterns = listOf(
+            Regex("""^(?:لطفا\\s+)?(?:به|با)\\s+(.+?)\\s+(?:زنگ\\s*(?:بزن|بزنید)|تماس\\s*(?:بگیر|بگیرید)|تلفن\\s*کن)$"""),
+            Regex("""^(?:لطفا\\s+)?(.+?)\\s+(?:رو|را)?\\s*(?:تماس\\s*بگیر|زنگ\\s*بزن)$"""),
+            Regex("""^(?:با|به)\\s+(.+?)\\s+(?:تماس\\s*بگیر|زنگ\\s*بزن)$""")
+        )
+        return patterns.firstNotNullOfOrNull { it.find(q)?.groupValues?.get(1)?.trim()?.takeIf { name -> name.isNotBlank() } }
     }
 
     private fun beginContactAction(recipient: String, body: String, action: String) {
