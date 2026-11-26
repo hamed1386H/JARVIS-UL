@@ -50,6 +50,9 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
     private lateinit var chatScroll: ScrollView
     private lateinit var input: EditText
     private lateinit var tts: TextToSpeech
+    private val cloudTts by lazy { PersianCloudTts(this) }
+    private val speechExecutor = Executors.newSingleThreadExecutor()
+    private var cloudPlayer: android.media.MediaPlayer? = null
     private var speechRecognizer: SpeechRecognizer? = null
     @Volatile private var androidRecognitionActive = false
     private var ttsReady = false
@@ -297,13 +300,13 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
     private fun showJarvisSettings() {
         val groups = arrayOf(
             "🧠 هوش مصنوعی و مدل‌ها" to arrayOf("دانلود / فعال‌سازی مدل محلی Qwen", "انتخاب فایل مدل GGUF", "تخلیه مدل از حافظه", "روشن / خاموش کردن هوش محلی", "تنظیم موتور هوش آنلاین"),
-            "🎙 صدا و گفتار" to arrayOf("انتخاب صدای خروجی JARVIS", "دانلود / فعال‌سازی تشخیص گفتار Whisper", "راهنمای نصب صدای فارسی گوشی"),
+            "🎙 صدا و گفتار" to arrayOf("انتخاب صدای خروجی JARVIS", "تنظیم صدای فارسی آنلاین (مردانه)", "دانلود / فعال‌سازی تشخیص گفتار Whisper", "راهنمای نصب صدای فارسی گوشی"),
             "📱 گوشی و دسترسی‌ها" to arrayOf("مدیریت مجوزهای گوشی", "برنامه‌های نصب‌شده", "تنظیمات وای‌فای", "تنظیمات بلوتوث", "صدا و روشنایی", "تنظیمات باتری"),
             "⚙️ دستیار و اطلاعات" to arrayOf("فعال / غیرفعال کردن گوش‌به‌زنگ", "پاک‌کردن تاریخچه گفتگو", "درباره JARVIS")
         )
         val actions = arrayOf(
             arrayOf<() -> Unit>({ promptRecommendedModelDownload() }, { selectLocalModel() }, { unloadLocalModel() }, { toggleLocalAi() }, { showOnlineAiSettings() }),
-            arrayOf<() -> Unit>({ showVoicePicker() }, { promptWhisperModelDownload() }, { showTtsHelp() }),
+            arrayOf<() -> Unit>({ showVoicePicker() }, { showPersianCloudTtsSettings() }, { promptWhisperModelDownload() }, { showTtsHelp() }),
             arrayOf<() -> Unit>({ showPermissionCenter() }, { showApps() }, { openWifi() }, { openSettings(Settings.ACTION_BLUETOOTH_SETTINGS) }, { volumeDialog() }, { openSettings(Settings.ACTION_BATTERY_SAVER_SETTINGS) }),
             arrayOf<() -> Unit>({ toggleWakeMode() }, { clearConversation() }, { showAboutJarvis() })
         )
@@ -324,11 +327,49 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
 
     private fun showTtsHelp() {
         AlertDialog.Builder(this).setTitle("فعال‌سازی صدای فارسی")
-            .setMessage("اگر JARVIS متن را می‌فهمد اما صدا پخش نمی‌کند، در تنظیمات گوشی وارد بخش تبدیل متن به گفتار (Text-to-speech output) شو، موتور گفتار را انتخاب کن و داده صوتی فارسی را نصب کن. سپس JARVIS را ببند و دوباره باز کن.")
-            .setPositiveButton("باز کردن تنظیمات گفتار") { _, _ ->
+            .setMessage("اگر موتور گفتار گوشی فارسی ندارد، از گزینه «تنظیم صدای فارسی آنلاین» استفاده کن. این قابلیت به کلید جداگانه ElevenLabs نیاز دارد؛ کلید Groq برای تولید صدای فارسی پشتیبانی نمی‌شود.")
+            .setPositiveButton("تنظیم صدای فارسی آنلاین") { _, _ -> showPersianCloudTtsSettings() }
+            .setNegativeButton("تنظیمات گفتار گوشی") { _, _ ->
                 try { startActivity(Intent("com.android.settings.TTS_SETTINGS")) }
                 catch (_: Exception) { openSettings(Settings.ACTION_SETTINGS) }
-            }.setNegativeButton("بستن", null).show()
+            }.show()
+    }
+
+    private fun showPersianCloudTtsSettings() {
+        val panel = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; setPadding(dp(20), dp(8), dp(20), dp(4)) }
+        val key = EditText(this).apply {
+            hint = "کلید API سرویس صدای فارسی ElevenLabs"
+            setText(cloudTts.apiKey())
+            inputType = android.text.InputType.TYPE_CLASS_TEXT or android.text.InputType.TYPE_TEXT_VARIATION_PASSWORD
+            textSize = 13f
+        }
+        val voice = EditText(this).apply {
+            hint = "شناسه صدای مردانه (Voice ID)"
+            setText(cloudTts.voiceId())
+            textSize = 13f
+        }
+        panel.addView(TextView(this).apply {
+            text = "برای صحبت فارسی با صدای مردانه، از ElevenLabs Multilingual v2 استفاده می‌شود. کلید Groq گفت‌وگو را انجام می‌دهد اما صدای فارسی تولید نمی‌کند. کلید صدا جداگانه است و فقط روی گوشی ذخیره می‌شود. شناسه پیش‌فرض Adam است."
+            setTextColor(Color.LTGRAY); textSize = 13f
+        })
+        panel.addView(TextView(this).apply {
+            text = "دریافت کلید: elevenlabs.io/app/settings/api-keys"
+            setTextColor(Color.CYAN); textSize = 13f; setPadding(0, dp(8), 0, dp(8))
+            setOnClickListener { try { startActivity(Intent(Intent.ACTION_VIEW, Uri.parse("https://elevenlabs.io/app/settings/api-keys"))) } catch (_: Exception) {} }
+        })
+        panel.addView(key); panel.addView(voice)
+        AlertDialog.Builder(this).setTitle("صدای فارسی JARVIS").setView(panel)
+            .setPositiveButton("ذخیره") { _, _ ->
+                cloudTts.saveConfig(key.text.toString(), voice.text.toString())
+                if (cloudTts.isConfigured()) {
+                    val queued = pendingSpeech
+                    pendingSpeech = null
+                    reply("صدای فارسی آنلاین ذخیره شد؛ سلام قربان، در خدمتم.")
+                    if (!queued.isNullOrBlank()) speak(queued)
+                } else reply("کلید API و شناسه صدا را کامل وارد کن.")
+            }
+            .setNeutralButton("پاک‌کردن") { _, _ -> cloudTts.saveConfig("", ""); reply("صدای فارسی آنلاین غیرفعال شد.") }
+            .setNegativeButton("بستن", null).show()
     }
 
     private fun weightParams() = LinearLayout.LayoutParams(0, -2, 1f).apply { setMargins(3, 3, 3, 3) }
@@ -1115,9 +1156,14 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
     }
 
     private fun showVoicePicker() {
-        if (!ttsReady) { reply("موتور صدای گوشی هنوز آماده نیست"); return }
-        val voices = tts.voices?.filter { it.locale.language == "fa" || it.locale.language == "en" }?.sortedWith(compareBy({ it.locale.language }, { it.name })) ?: emptyList()
-        if (voices.isEmpty()) { reply("صدای جایگزین نصب‌شده‌ای پیدا نکردم؛ از تنظیمات تبدیل متن به گفتار اندروید صدا نصب کن"); return }
+        val voices = try { tts.voices?.filter { it.locale.language == "fa" }?.sortedByDescending { it.quality } ?: emptyList() } catch (_: Exception) { emptyList() }
+        if (voices.isEmpty()) {
+            AlertDialog.Builder(this).setTitle("صدای فارسی نصب نیست")
+                .setMessage("روی این گوشی صدای فارسی محلی پیدا نشد. برای اینکه JARVIS واقعاً فارسی صحبت کند، صدای آنلاین مردانه را تنظیم کن.")
+                .setPositiveButton("تنظیم صدای فارسی آنلاین") { _, _ -> showPersianCloudTtsSettings() }
+                .setNegativeButton("بستن", null).show()
+            return
+        }
         val labels = voices.map { v ->
             val lang = if (v.locale.language == "fa") "فارسی" else "English"
             val quality = when (v.quality) { android.speech.tts.Voice.QUALITY_HIGH -> "کیفیت بالا"; android.speech.tts.Voice.QUALITY_NORMAL -> "معمولی"; else -> "کیفیت پایه" }
@@ -1173,6 +1219,8 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
             reply("در خدمتم")
             return
         }
+        val googleQuery = extractGoogleSearchQuery(raw)
+        if (!googleQuery.isNullOrBlank()) { openGoogleSearch(googleQuery); return }
         val smsRequest = parseSmsRequest(raw)
         if (smsRequest != null) { beginSmsFlow(smsRequest.first, smsRequest.second); return }
         if (q.contains("پیام بده") || q.contains("پیامک بده") || q.contains("اس ام اس بده")) {
@@ -1382,9 +1430,33 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
     private fun showApps() {
         val intent = Intent(Intent.ACTION_MAIN, null).addCategory(Intent.CATEGORY_LAUNCHER)
         val apps = packageManager.queryIntentActivities(intent, 0).sortedBy { it.loadLabel(packageManager).toString() }
-        val names = apps.map { it.loadLabel(packageManager).toString() }
-        addLog("JARVIS", if (names.isEmpty()) "برنامه‌ای پیدا نشد" else "برنامه‌های قابل اجرا:\n" + names.joinToString("\n"))
-        reply("فهرست ${names.size} برنامه را نمایش دادم")
+        if (apps.isEmpty()) { reply("برنامه‌ای برای اجرا پیدا نکردم."); return }
+        val names = apps.map { it.loadLabel(packageManager).toString() }.toTypedArray()
+        AlertDialog.Builder(this).setTitle("برنامه‌های گوشی · \${names.size}")
+            .setItems(names) { _, which ->
+                val info = apps[which]
+                val launch = packageManager.getLaunchIntentForPackage(info.activityInfo.packageName)
+                if (launch != null) try { startActivity(launch) } catch (_: Exception) { reply("بازکردن برنامه ممکن نشد.") }
+                else reply("این برنامه قابلیت اجرا از فهرست برنامه‌ها را ندارد.")
+            }.setNegativeButton("بستن", null).show()
+    }
+
+    private fun extractGoogleSearchQuery(raw: String): String? {
+        var q = normalize(raw).trim().removePrefix("جارویس").trim()
+        val starts = listOf("در گوگل بگرد", "توی گوگل بگرد", "تو گوگل بگرد", "در گوگل جستجو کن", "توی گوگل جستجو کن", "گوگل سرچ کن", "در گوگل سرچ کن", "توی گوگل سرچ کن", "در گوگل پیدا کن", "search google for", "google search")
+        for (prefix in starts) if (q.startsWith(prefix)) { q = q.removePrefix(prefix).trim(); break }
+        val endings = listOf(" را در گوگل جستجو کن", " رو در گوگل جستجو کن", " در گوگل جستجو کن", " را گوگل کن", " رو گوگل کن", " سرچ کن", " جستجو کن", " بگرد")
+        for (suffix in endings) if (q.endsWith(suffix)) { q = q.removeSuffix(suffix).trim(); break }
+        return q.takeIf { it.length >= 2 && (raw.contains("گوگل") || raw.contains("google", true)) }
+    }
+
+    private fun openGoogleSearch(query: String) {
+        try {
+            val encoded = java.net.URLEncoder.encode(query, "UTF-8")
+            val intent = Intent(Intent.ACTION_VIEW, Uri.parse("https://www.google.com/search?q=$encoded")).addCategory(Intent.CATEGORY_BROWSABLE)
+            reply("در گوگل برای «$query» جستجو می‌کنم.")
+            startActivity(intent)
+        } catch (_: Exception) { reply("بازکردن جستجوی گوگل ممکن نشد؛ مرورگر را بررسی کن.") }
     }
 
     private fun volumeDialog() {
@@ -1877,8 +1949,9 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
     private fun speak(message: String) {
         if (!::tts.isInitialized) { pendingSpeech = message; return }
         if (!ttsReady) {
+            if (cloudTts.isConfigured()) { speakCloud(message); return }
             pendingSpeech = message
-            status.text = "در انتظار آماده‌شدن صدای فارسی…"
+            if (::status.isInitialized) status.text = "صدای فارسی نصب نیست؛ از تنظیمات، صدای فارسی آنلاین را فعال کن."
             return
         }
         if (::orbView.isInitialized) setJarvisMode(JarvisOrbView.Mode.SPEAKING)
@@ -1893,8 +1966,66 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
             }, "jarvis_${System.nanoTime()}")
         } catch (_: Exception) { TextToSpeech.ERROR }
         if (result == TextToSpeech.ERROR) {
-            if (::orbView.isInitialized) setJarvisMode(JarvisOrbView.Mode.IDLE)
-            status.text = "پخش صدا ناموفق بود؛ موتور و صدای فارسی گوشی را بررسی کن."
+            if (cloudTts.isConfigured()) speakCloud(message)
+            else {
+                if (::orbView.isInitialized) setJarvisMode(JarvisOrbView.Mode.IDLE)
+                status.text = "پخش صدا ناموفق بود؛ موتور گفتار گوشی را بررسی کن یا صدای فارسی آنلاین را تنظیم کن."
+            }
+        }
+    }
+
+    private fun speakCloud(message: String) {
+        if (!cloudTts.isConfigured()) { pendingSpeech = message; status.text = "برای صدای فارسی آنلاین، کلید سرویس را وارد کن."; return }
+        setJarvisMode(JarvisOrbView.Mode.SPEAKING)
+        status.text = "در حال ساخت صدای فارسی JARVIS…"
+        speechExecutor.execute {
+            try {
+                val audioFile = cloudTts.synthesize(message)
+                runOnUiThread {
+                    try {
+                        cloudPlayer?.release()
+                        cloudPlayer = android.media.MediaPlayer().apply {
+                            setDataSource(audioFile.absolutePath)
+                            setOnPreparedListener { player -> status.text = "JARVIS در حال صحبت است…"; player.start() }
+                            setOnCompletionListener { player ->
+                                player.release(); cloudPlayer = null
+                                finishSpeechTurn()
+                                try { audioFile.delete() } catch (_: Exception) {}
+                            }
+                            setOnErrorListener { player, _, _ ->
+                                player.release(); cloudPlayer = null
+                                status.text = "پخش صدای فارسی ناموفق بود."
+                                finishSpeechTurn()
+                                try { audioFile.delete() } catch (_: Exception) {}
+                                true
+                            }
+                            prepareAsync()
+                        }
+                    } catch (e: Exception) {
+                        cloudPlayer?.release(); cloudPlayer = null
+                        status.text = "پخش صدای فارسی ناموفق بود: \${e.message ?: "خطا"}"
+                        finishSpeechTurn()
+                    }
+                }
+            } catch (e: Exception) {
+                runOnUiThread {
+                    status.text = "ساخت صدای فارسی ناموفق بود: \${e.message ?: "خطای شبکه"}"
+                    if (::orbView.isInitialized) setJarvisMode(JarvisOrbView.Mode.IDLE)
+                    if (wakeMode && activityVisible && !isFinishing) startWakeServiceNow()
+                }
+            }
+        }
+    }
+
+    private fun finishSpeechTurn() {
+        if (::orbView.isInitialized) { orbView.setAudioLevel(0f); setJarvisMode(JarvisOrbView.Mode.IDLE) }
+        if (wakePromptPending && activityVisible && !isFinishing) {
+            wakePromptPending = false
+            wakeCommandInProgress = true
+            beginListening()
+        } else if (wakeMode && activityVisible && !isFinishing) {
+            wakeCommandInProgress = false
+            startWakeServiceNow()
         }
     }
 
@@ -1934,31 +2065,11 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
                 override fun onStart(utteranceId: String?) {
                     runOnUiThread { if (::orbView.isInitialized) { setJarvisMode(JarvisOrbView.Mode.SPEAKING); orbView.setAudioLevel(0.15f) } }
                 }
-                override fun onDone(utteranceId: String?) {
-                    runOnUiThread {
-                        if (::orbView.isInitialized) { orbView.setAudioLevel(0f); setJarvisMode(JarvisOrbView.Mode.IDLE) }
-                        if (wakePromptPending && activityVisible && !isFinishing) {
-                            wakePromptPending = false
-                            wakeCommandInProgress = true
-                            beginListening()
-                        } else if (wakeMode && activityVisible && !isFinishing) {
-                            wakeCommandInProgress = false
-                            startWakeServiceNow()
-                        }
-                    }
-                }
+                override fun onDone(utteranceId: String?) { runOnUiThread { finishSpeechTurn() } }
                 override fun onError(utteranceId: String?) {
                     runOnUiThread {
-                        if (::orbView.isInitialized) { orbView.setAudioLevel(0f); setJarvisMode(JarvisOrbView.Mode.IDLE) }
                         status.text = "موتور گفتار نتوانست صدا را پخش کند؛ صدای فارسی گوشی را بررسی کن."
-                        if (wakePromptPending && activityVisible && !isFinishing) {
-                            wakePromptPending = false
-                            wakeCommandInProgress = true
-                            beginListening()
-                        } else if (wakeMode && activityVisible && !isFinishing) {
-                            wakeCommandInProgress = false
-                            startWakeServiceNow()
-                        }
+                        finishSpeechTurn()
                     }
                 }
                 override fun onError(utteranceId: String?, errorCode: Int) {
@@ -1989,7 +2100,7 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
             // support fa-IR through setLanguage while exposing an empty voices list.
             ttsReady = result >= TextToSpeech.LANG_AVAILABLE
             if (!ttsReady) {
-                status.text = "صدای فارسی روی موتور گفتار نصب یا پشتیبانی نمی‌شود؛ از تنظیمات، داده گفتار فارسی را نصب کن."
+                status.text = if (cloudTts.isConfigured()) "صدای فارسی آنلاین آماده استفاده است." else "صدای فارسی نصب نیست؛ در تنظیمات JARVIS صدای آنلاین را فعال کن."
             } else {
                 val engineLabel = when {
                     selectedTtsEnginePackage.contains("xiaomi", true) ||
@@ -1999,7 +2110,7 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
                     else -> "موتور پیش‌فرض گوشی"
                 }
                 status.text = "صدای فارسی JARVIS آماده است · $engineLabel"
-                pendingSpeech?.let { queued -> pendingSpeech = null; speak(queued) }
+                if (ttsReady || cloudTts.isConfigured()) pendingSpeech?.let { queued -> pendingSpeech = null; speak(queued) }
             }
         } else {
             ttsReady = false
