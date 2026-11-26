@@ -288,7 +288,7 @@ class WakeWordService : Service() {
         val callMatch = Regex("""^(?:لطفا\s+)?(?:به|با)\s+(.+?)\s+(?:زنگ\s+بزن|تماس\s+بگیر|تلفن\s+کن)$""").find(q)
         val isSms = smsMatch != null
         val recipient = (smsMatch?.groupValues?.get(1) ?: callMatch?.groupValues?.get(1))?.trim() ?: return null
-        val body = if (isSms) Regex("""(?:بنویس|متن(?:ش)?(?:\s+این)?(?:\s+باشه)?|بگو)\s*[:：،,-]*\s*(.+)$""")
+        val body = if (isSms) Regex("""(?:و\s*)?(?:بنویس|متن(?:ش)?(?:\s+این)?(?:\s+باشه)?|بگو|بفرست)\s*[:：،,-]*\s*(.+)$""")
             .find(q)?.groupValues?.get(1)?.trim().orEmpty() else ""
         if (isSms && body.isBlank()) return "متن پیام مشخص نیست؛ بگو: به نام مخاطب پیام بده، بنویس متن پیام."
         val required = if (isSms) android.Manifest.permission.SEND_SMS else android.Manifest.permission.CALL_PHONE
