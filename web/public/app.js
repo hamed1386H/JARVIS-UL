@@ -90,10 +90,13 @@ $("logoutBtn").addEventListener("click", async () => {
   try { await api("/api/logout", { method: "POST", body: "{}" }); } catch (_) {}
   $("settingsDialog").close(); loginDialog.showModal();
 });
-$("clearBtn").addEventListener("click", () => {
-  // UI-only clear: persistent shared history remains intact to avoid accidental deletion.
-  messages.replaceChildren();
-  addMessage("assistant", "گفتگوی روی صفحه پاک شد. تاریخچه مشترک سرور حفظ شده است.");
+$("clearBtn").addEventListener("click", async () => {
+  if (!confirm("تاریخچه مشترک جارویس برای همه نسخه‌ها پاک شود؟")) return;
+  try {
+    await api("/api/history", { method: "DELETE" });
+    messages.replaceChildren();
+    addMessage("assistant", "تاریخچه گفتگو پاک شد.");
+  } catch (err) { setStatus(err.message); }
 });
 function speak(text) {
   if (!("speechSynthesis" in window)) return;
