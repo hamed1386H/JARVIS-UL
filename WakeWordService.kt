@@ -342,7 +342,7 @@ class WakeWordService : Service() {
                 "درخواست تماس با " + match.name + " به سرویس تماس گوشی سپرده شد."
             } else {
                 val sms = if (android.os.Build.VERSION.SDK_INT >= 31) {
-                    getSystemService(SmsManager::class.java) ?: throw IllegalStateException("سرویس پیامک در دسترس نیست")
+                    getSystemService(SmsManager::class.java) ?: SmsManager.getDefault()
                 } else SmsManager.getDefault()
                 val parts = sms.divideMessage(body)
                 val batchId = System.currentTimeMillis()
@@ -449,32 +449,22 @@ class WakeWordService : Service() {
             }
         }
 
-        val modelFile = File(getExternalFilesDir(Environment.DIRECTORY_DOWNLOADS)
-            ?: File(filesDir, "models"), "Qwen_Qwen3-1.7B-Q4_K_M.gguf")
-        if (getSharedPreferences("cht_ai", Context.MODE_PRIVATE).getBoolean("local_ai_enabled", true) && modelFile.isFile) {
+        // Never cold-load the multi-gigabyte model in response to a wake-word command:
+        // this used to hold the microphone loop and delay the answer for minutes.
+        if (getSharedPreferences("cht_ai", Context.MODE_PRIVATE).getBoolean("local_ai_enabled", true) &&
+            backgroundLocalAiLoaded.get() && backgroundLocalAi.isLoaded()) {
             try {
-                // Keep Qwen loaded between commands: first response pays model-load cost,
-                // following responses avoid reloading the multi-gigabyte model.
-                if (backgroundLocalAiLoaded.compareAndSet(false, true)) {
-                    try {
-                        backgroundLocalAi.load(modelFile.absolutePath,
-                            threads = Runtime.getRuntime().availableProcessors().coerceIn(3, 6), context = 1536)
-                    } catch (loadError: Exception) {
-                        backgroundLocalAiLoaded.set(false)
-                        throw loadError
-                    }
-                }
                 val prompt = agent.buildLocalPrompt(
-                    "فقط پاسخ کوتاه و مستقیم به فارسی بده. درخواست: " + command.take(900),
+                    "فقط پاسخ کوتاه و مستقیم به فارسی بده. درخواست: " + command.take(700),
                     org.json.JSONArray()
                 )
-                return backgroundLocalAi.generate(prompt, 96).replace(Regex("<think>[\\s\\S]*?</think>"), "")
+                return backgroundLocalAi.generate(prompt, 64).replace(Regex("<think>[\\s\\S]*?</think>"), "")
                     .trim().ifBlank { "پاسخ خالی بود؛ دوباره بگو." }
             } catch (e: Exception) {
-                return "نتوانستم پاسخ را آماده کنم: " + (e.message ?: "خطای مدل محلی")
+                return "پاسخ محلی آماده نشد: " + (e.message ?: "خطای مدل")
             }
         }
-        return "اتصال هوش آنلاین در دسترس نیست و مدل محلی هم آماده نیست. تنظیمات اتصال یا مدل را در JARVIS بررسی کن."
+        return "برای پاسخ سریع در حالت آماده‌باش، هوش آنلاین را در تنظیمات فعال کن. مدل محلی در پس‌زمینه بارگذاری اولیه نمی‌شود تا پاسخ چند دقیقه معطل نماند."
     }
 
     private fun showAnswerNotification(message: String, title: String = "پاسخ جارویس") {
