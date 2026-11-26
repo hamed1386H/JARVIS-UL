@@ -512,7 +512,7 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
                 status.text = "مدل فارسی در حال آماده‌سازی است…"
                 return
             }
-            if (whisperModelFile.isFile && whisperModelFile.length() > 50000000L) {
+            if (whisperModelFile.isFile && whisperModelFile.length() > 15000000L) {
                 loadWhisperModel(whisperModelFile)
                 return
             }
@@ -638,7 +638,7 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
     }
 
     private fun autoLoadWhisperModel() {
-        if (whisperModelFile.isFile && whisperModelFile.length() > 50000000L && WhisperEngine.isAvailable()) {
+        if (whisperModelFile.isFile && whisperModelFile.length() > 15000000L && WhisperEngine.isAvailable()) {
             loadWhisperModel(whisperModelFile)
         }
     }
@@ -646,7 +646,7 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
     private fun promptWhisperModelDownload() {
         showModelDownloadDialog(
             title = "مدل چندزبانه تشخیص گفتار Whisper",
-            description = "مدل چندزبانه Whisper Base Q8 حدود ۷۸ مگابایت است و گفتار فارسی و انگلیسی و زبان‌های دیگر را تشخیص می‌دهد. دانلود مستقیم یا دانلود با Chrome و ADM را انتخاب کن.",
+            description = "مدل سبک Whisper Tiny Q5 حدود ۳۲ مگابایت است؛ برای سرعت بیشتر روی گوشی‌های میان‌رده، با کمی افت دقت نسبت به Base. دانلود مستقیم یا دانلود با Chrome و ADM را انتخاب کن.",
             url = WHISPER_MODEL_URL,
             fileName = WHISPER_MODEL_FILENAME,
             isWhisper = true
@@ -870,7 +870,7 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
                 contentResolver.openInputStream(uri)!!.use { input ->
                     whisperModelFile.outputStream().buffered(1024 * 1024).use { output -> input.copyTo(output, 1024 * 1024) }
                 }
-                require(whisperModelFile.length() > 50000000L) { "فایل انتخاب‌شده اندازه مدل Whisper را ندارد." }
+                require(whisperModelFile.length() > 15000000L) { "فایل انتخاب‌شده اندازه مدل Whisper را ندارد." }
                 whisper.load(whisperModelFile.absolutePath)
                 runOnUiThread { reply("مدل فارسی Whisper بارگذاری شد؛ تشخیص صدا داخل JARVIS انجام می‌شود.") }
             } catch (e: Exception) { runOnUiThread { reply("وارد کردن مدل Whisper ناموفق بود: " + (e.message ?: "خطا")) }
@@ -909,7 +909,7 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
         val manager = getSystemService(Context.DOWNLOAD_SERVICE) as DownloadManager
         manager.query(DownloadManager.Query().setFilterById(id))?.use { cursor ->
             if (cursor.moveToFirst() && cursor.getInt(cursor.getColumnIndexOrThrow(DownloadManager.COLUMN_STATUS)) == DownloadManager.STATUS_SUCCESSFUL &&
-                whisperModelFile.isFile && whisperModelFile.length() > 50000000L) {
+                whisperModelFile.isFile && whisperModelFile.length() > 15000000L) {
                 prefs.edit().remove(KEY_WHISPER_DOWNLOAD_ID).apply()
                 loadWhisperModel(whisperModelFile)
             } else { prefs.edit().remove(KEY_WHISPER_DOWNLOAD_ID).apply(); reply("دانلود مدل Whisper کامل یا معتبر نبود.") }
@@ -1803,8 +1803,8 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
     }
 
     companion object {
-        private const val WHISPER_MODEL_FILENAME = "ggml-base-q8_0.bin"
-        private const val WHISPER_MODEL_URL = "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-base-q8_0.bin"
+        private const val WHISPER_MODEL_FILENAME = "ggml-tiny-q5_1.bin"
+        private const val WHISPER_MODEL_URL = "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-tiny-q5_1.bin"
         private const val KEY_WHISPER_DOWNLOAD_ID = "jarvis_whisper_download_id"
         private const val MODEL_FILENAME = "Qwen_Qwen3-1.7B-Q4_K_M.gguf"
         private const val MODEL_URL = "https://huggingface.co/bartowski/Qwen_Qwen3-1.7B-GGUF/resolve/main/Qwen_Qwen3-1.7B-Q4_K_M.gguf"
