@@ -642,8 +642,7 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
                     runOnUiThread {
                         if (::orbView.isInitialized) {
                             orbView.setAudioLevel(0f)
-                            if (orbView.mode != JarvisOrbView.Mode.SPEAKING &&
-                                orbView.mode != JarvisOrbView.Mode.THINKING) {
+                            if (!::tts.isInitialized || !tts.isSpeaking) {
                                 orbView.setMode(JarvisOrbView.Mode.IDLE)
                             }
                         }
