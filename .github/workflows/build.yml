@@ -133,13 +133,14 @@ jobs:
         env:
           JARVIS_KEYSTORE_BASE64: ${{ secrets.JARVIS_KEYSTORE_BASE64 }}
         run: |
-          if [ -n "$JARVIS_KEYSTORE_BASE64" ]; then
-            echo "$JARVIS_KEYSTORE_BASE64" | base64 --decode > "$RUNNER_TEMP/jarvis-release.jks"
-            echo "JARVIS_KEYSTORE_FILE=$RUNNER_TEMP/jarvis-release.jks" >> "$GITHUB_ENV"
-            echo "Persistent APK signing key configured."
-          else
-            echo "No persistent signing key configured; this build will use a temporary debug key and may not update an existing installation."
+          if [ -z "$JARVIS_KEYSTORE_BASE64" ]; then
+            echo "::error::Persistent signing key is required. Add JARVIS_KEYSTORE_BASE64 and the three password/alias secrets before building; a temporary debug key cannot update the installed APK."
+            exit 1
           fi
+          echo "$JARVIS_KEYSTORE_BASE64" | base64 --decode > "$RUNNER_TEMP/jarvis-release.jks"
+          test -s "$RUNNER_TEMP/jarvis-release.jks"
+          echo "JARVIS_KEYSTORE_FILE=$RUNNER_TEMP/jarvis-release.jks" >> "$GITHUB_ENV"
+          echo "Persistent APK signing key configured."
 
       - name: Build APK with local llama.cpp runtime
         working-directory: jarvis-source
