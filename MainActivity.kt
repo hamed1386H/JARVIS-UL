@@ -349,7 +349,7 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
             textSize = 13f
         }
         panel.addView(TextView(this).apply {
-            text = "برای صحبت فارسی با صدای مردانه، از ElevenLabs Multilingual v2 استفاده می‌شود. کلید Groq گفت‌وگو را انجام می‌دهد اما صدای فارسی تولید نمی‌کند. کلید صدا جداگانه است و فقط روی گوشی ذخیره می‌شود. شناسه پیش‌فرض Adam است."
+            text = "برای صحبت فارسی با صدای مردانه، از مدل ElevenLabs v3 استفاده می‌شود. کلید Groq گفت‌وگو را انجام می‌دهد اما صدای فارسی تولید نمی‌کند. کلید صدا جداگانه است و فقط روی گوشی ذخیره می‌شود. شناسه پیش‌فرض Adam است."
             setTextColor(Color.LTGRAY); textSize = 13f
         })
         panel.addView(TextView(this).apply {
@@ -1436,7 +1436,7 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
             .setItems(names) { _, which ->
                 val info = apps[which]
                 val launch = packageManager.getLaunchIntentForPackage(info.activityInfo.packageName)
-                if (launch != null) try { startActivity(launch) } catch (_: Exception) { reply("بازکردن برنامه ممکن نشد.") }
+                if (launch != null) { reply("${names[which]} را باز می‌کنم."); try { startActivity(launch) } catch (_: Exception) { reply("بازکردن برنامه ممکن نشد.") } }
                 else reply("این برنامه قابلیت اجرا از فهرست برنامه‌ها را ندارد.")
             }.setNegativeButton("بستن", null).show()
     }
