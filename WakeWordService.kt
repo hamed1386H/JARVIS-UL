@@ -221,11 +221,11 @@ class WakeWordService : Service() {
 
 
     private fun executeBackgroundNavigation(command: String): String? {
-        val q = normalizeSpeech(command).replace(Regex("\\s+"), " ").trim()
+        val q = normalizeSpeech(command).replace(Regex("\s+"), " ").trim()
         val weather = q.contains("هواشناسی") || q.contains("آب و هوا") || q.contains("اب و هوا") || q.contains("وضعیت هوا")
-        val searchMatch = Regex("""(?:در\\s+گوگل\\s+)?(?:جستجو کن|جست‌وجو کن|بگرد|سرچ کن)\\s*(?:برای|دنبال)?\\s*(.*)$""").find(q)
+        val searchMatch = Regex("""(?:در\s+گوگل\s+)?(?:جستجو کن|جست‌وجو کن|بگرد|سرچ کن)\s*(?:برای|دنبال)?\s*(.*)$""").find(q)
         if (weather || searchMatch != null) {
-            val place = Regex("""(?:در|برای|شهر)\\s+(.+?)(?:\\s+(?:رو|را)?\\s*(?:چک کن|بررسی کن))?$""").find(q)?.groupValues?.get(1)?.trim().orEmpty()
+            val place = Regex("""(?:در|برای|شهر)\s+(.+?)(?:\s+(?:رو|را)?\s*(?:چک کن|بررسی کن))?$""").find(q)?.groupValues?.get(1)?.trim().orEmpty()
             val query = if (weather) {
                 if (place.isBlank()) "هواشناسی امروز" else "هواشناسی " + place
             } else searchMatch?.groupValues?.get(1)?.trim().orEmpty()
@@ -237,15 +237,15 @@ class WakeWordService : Service() {
             } catch (_: Exception) { "بازکردن جستجوی گوگل ممکن نشد؛ مرورگر را بررسی کن." }
         }
 
-        val appTarget = Regex("""^(?:لطفا\\s+)?(.+?)\\s+(?:رو\\s+|را\\s+)?(?:باز\\s*کن|اجرا\\s*کن|راه\\s*بنداز)$""").find(q)?.groupValues?.get(1)?.trim()
-            ?: Regex("""^(?:باز\\s*کن|اجرا\\s*کن)\\s+(.+)$""").find(q)?.groupValues?.get(1)?.trim()
+        val appTarget = Regex("""^(?:لطفا\s+)?(.+?)\s+(?:رو\s+|را\s+)?(?:باز\s*کن|اجرا\s*کن|راه\s*بنداز)$""").find(q)?.groupValues?.get(1)?.trim()
+            ?: Regex("""^(?:باز\s*کن|اجرا\s*کن)\s+(.+)$""").find(q)?.groupValues?.get(1)?.trim()
             ?: return null
         return try {
             val installed = packageManager.getInstalledApplications(PackageManager.GET_META_DATA)
-            val target = appTarget.replace(Regex("\\\\s+"), "")
+            val target = appTarget.replace(Regex("\\\s+"), "")
             val candidates = installed.mapNotNull { info ->
                 val label = packageManager.getApplicationLabel(info).toString()
-                val normalized = normalizeSpeech(label).replace(Regex("\\\\s+"), "")
+                val normalized = normalizeSpeech(label).replace(Regex("\\\s+"), "")
                 val score = when {
                     normalized == target -> 100
                     normalized.startsWith(target) || target.startsWith(normalized) -> 80
