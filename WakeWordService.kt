@@ -149,9 +149,9 @@ class WakeWordService : Service() {
                 } else ""
 
                 if (hasWake && command.length < 2) {
-                    waitingForCommandUntil = System.currentTimeMillis() + 15000L
                     showAnswerNotification("در خدمتم؛ فرمانت را بگو")
                     speakWithMicPaused(recorder, "در خدمتم")
+                    waitingForCommandUntil = System.currentTimeMillis() + 20000L
                     updateNotification("در انتظار فرمان تو هستم")
                     continue
                 }
@@ -358,6 +358,32 @@ class WakeWordService : Service() {
     /** Uses the phone's installed Persian TTS engine for a short hands-free acknowledgement/answer. */
     private fun speakInBackground(message: String) {
         if (message.isBlank()) return
+        val cloud = PersianCloudTts(this)
+        if (cloud.isConfigured()) {
+            var player: android.media.MediaPlayer? = null
+            var audioFile: File? = null
+            try {
+                audioFile = cloud.synthesize(message)
+                val completed = java.util.concurrent.CountDownLatch(1)
+                player = android.media.MediaPlayer().apply {
+                    setDataSource(audioFile!!.absolutePath)
+                    setOnCompletionListener { completed.countDown() }
+                    setOnErrorListener { _, _, _ -> completed.countDown(); true }
+                    prepare()
+                    start()
+                }
+                completed.await(35, java.util.concurrent.TimeUnit.SECONDS)
+                try { player.stop() } catch (_: Exception) {}
+                try { player.release() } catch (_: Exception) {}
+                player = null
+                try { audioFile.delete() } catch (_: Exception) {}
+                return
+            } catch (_: Exception) {
+                try { player?.release() } catch (_: Exception) {}
+                try { audioFile?.delete() } catch (_: Exception) {}
+                // Fall back to the phone's installed TTS engine if cloud speech fails.
+            }
+        }
         val ready = java.util.concurrent.CountDownLatch(1)
         val finished = java.util.concurrent.CountDownLatch(1)
         var speaker: android.speech.tts.TextToSpeech? = null
