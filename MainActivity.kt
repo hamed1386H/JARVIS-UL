@@ -104,7 +104,15 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        tts = TextToSpeech(this, this)
+        // Prefer Google's Android speech engine when installed; otherwise use an installed engine.
+        val ttsEngines = try {
+            packageManager.queryIntentServices(Intent(TextToSpeech.Engine.INTENT_ACTION_TTS_SERVICE), 0)
+                .map { it.serviceInfo.packageName }.distinct()
+        } catch (_: Exception) { emptyList() }
+        val preferredTtsEngine = ttsEngines.firstOrNull { it == "com.google.android.tts" }
+            ?: ttsEngines.firstOrNull()
+        tts = if (preferredTtsEngine.isNullOrBlank()) TextToSpeech(this, this)
+            else TextToSpeech(this, this, preferredTtsEngine)
         restoreConversation()
         buildUi()
         registerModelDownloadReceiver()
@@ -1845,11 +1853,15 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
         }
         if (::orbView.isInitialized) setJarvisMode(JarvisOrbView.Mode.SPEAKING)
         val result = try {
-            tts.speak(message, TextToSpeech.QUEUE_FLUSH, android.os.Bundle().apply {
+            tts.setAudioAttributes(android.media.AudioAttributes.Builder()
+                .setUsage(android.media.AudioAttributes.USAGE_MEDIA)
+                .setContentType(android.media.AudioAttributes.CONTENT_TYPE_SPEECH)
+                .build())
+            tts.speak(message.trim(), TextToSpeech.QUEUE_FLUSH, android.os.Bundle().apply {
                 putFloat(TextToSpeech.Engine.KEY_PARAM_VOLUME, 1.0f)
                 putInt(TextToSpeech.Engine.KEY_PARAM_STREAM, AudioManager.STREAM_MUSIC)
             }, "jarvis_${System.nanoTime()}")
-        } catch (e: Exception) { TextToSpeech.ERROR }
+        } catch (_: Exception) { TextToSpeech.ERROR }
         if (result == TextToSpeech.ERROR) {
             if (::orbView.isInitialized) setJarvisMode(JarvisOrbView.Mode.IDLE)
             status.text = "پخش صدا ناموفق بود؛ موتور و صدای فارسی گوشی را بررسی کن."
