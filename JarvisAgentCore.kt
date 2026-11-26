@@ -13,15 +13,17 @@ import java.net.URL
 class JarvisAgentCore(context: Context) {
     private val prefs = context.getSharedPreferences("jarvis_agent", Context.MODE_PRIVATE)
 
-    fun endpoint(): String = prefs.getString("endpoint", "") ?: ""
+    // GroqCloud offers a free developer tier and an OpenAI-compatible Chat Completions API.
+    // The user must create and enter their own API key; no secret is bundled in the APK.
+    fun endpoint(): String = prefs.getString("endpoint", "https://api.groq.com/openai/v1") ?: "https://api.groq.com/openai/v1"
     fun apiKey(): String = prefs.getString("api_key", "") ?: ""
-    fun model(): String = prefs.getString("model", "fast") ?: "fast"
+    fun model(): String = prefs.getString("model", "openai/gpt-oss-20b") ?: "openai/gpt-oss-20b"
 
     fun saveConfig(endpoint: String, key: String, model: String) {
         prefs.edit()
-            .putString("endpoint", endpoint.trim())
+            .putString("endpoint", endpoint.trim().ifBlank { "https://api.groq.com/openai/v1" })
             .putString("api_key", key.trim())
-            .putString("model", model.trim().ifBlank { "fast" })
+            .putString("model", model.trim().ifBlank { "openai/gpt-oss-20b" })
             .apply()
     }
 
