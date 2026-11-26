@@ -44,7 +44,7 @@ class PersianCloudTts(context: Context) {
             if (code !in 200..299) {
                 val detail = connection.errorStream?.bufferedReader(Charsets.UTF_8)?.use { it.readText() }.orEmpty()
                 val message = try { JSONObject(detail).optJSONObject("detail")?.optString("message") } catch (_: Exception) { null }
-                throw IllegalStateException("خطای سرویس صدا ($code): \${(message ?: detail).replace(Regex("\\\\s+"), " ").take(220)}")
+                throw IllegalStateException("خطای سرویس صدا ($code): ${(message ?: detail).replace(Regex("\\s+"), " ").take(220)}")
             }
             val file = File.createTempFile("jarvis-fa-", ".mp3")
             connection.inputStream.use { input -> file.outputStream().buffered(65536).use { output -> input.copyTo(output) } }
