@@ -1432,7 +1432,7 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
         val apps = packageManager.queryIntentActivities(intent, 0).sortedBy { it.loadLabel(packageManager).toString() }
         if (apps.isEmpty()) { reply("برنامه‌ای برای اجرا پیدا نکردم."); return }
         val names = apps.map { it.loadLabel(packageManager).toString() }.toTypedArray()
-        AlertDialog.Builder(this).setTitle("برنامه‌های گوشی · \${names.size}")
+        AlertDialog.Builder(this).setTitle("برنامه‌های گوشی · ${names.size}")
             .setItems(names) { _, which ->
                 val info = apps[which]
                 val launch = packageManager.getLaunchIntentForPackage(info.activityInfo.packageName)
@@ -2003,13 +2003,13 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
                         }
                     } catch (e: Exception) {
                         cloudPlayer?.release(); cloudPlayer = null
-                        status.text = "پخش صدای فارسی ناموفق بود: \${e.message ?: "خطا"}"
+                        status.text = "پخش صدای فارسی ناموفق بود: ${e.message ?: "خطا"}"
                         finishSpeechTurn()
                     }
                 }
             } catch (e: Exception) {
                 runOnUiThread {
-                    status.text = "ساخت صدای فارسی ناموفق بود: \${e.message ?: "خطای شبکه"}"
+                    status.text = "ساخت صدای فارسی ناموفق بود: ${e.message ?: "خطای شبکه"}"
                     if (::orbView.isInitialized) setJarvisMode(JarvisOrbView.Mode.IDLE)
                     if (wakeMode && activityVisible && !isFinishing) startWakeServiceNow()
                 }
