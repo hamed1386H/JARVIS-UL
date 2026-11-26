@@ -3,6 +3,10 @@ package com.chtai.assistant
 import android.app.*
 import android.content.Context
 import android.content.Intent
+import android.provider.ContactsContract
+import android.net.Uri
+import android.telephony.SmsManager
+import android.content.pm.PackageManager
 import android.media.AudioFormat
 import android.media.AudioRecord
 import android.media.MediaRecorder
@@ -146,7 +150,7 @@ class WakeWordService : Service() {
                 if (hasWake && command.length < 2) {
                     waitingForCommandUntil = System.currentTimeMillis() + 15000L
                     showAnswerNotification("در خدمتم؛ فرمانت را بگو")
-                    speakInBackground("در خدمتم")
+                    speakWithMicPaused(recorder, "در خدمتم")
                     updateNotification("در انتظار فرمان تو هستم")
                     continue
                 }
@@ -158,10 +162,10 @@ class WakeWordService : Service() {
                 }
 
                 waitingForCommandUntil = 0L
-                showAnswerNotification("درخواست: " + actualCommand + "\nدر حال آماده‌سازی پاسخ…", "در حال پردازش")
-                val answer = answerInBackground(actualCommand)
+                val actionResult = executeBackgroundPhoneAction(actualCommand)
+                val answer = actionResult ?: answerInBackground(actualCommand)
                 showAnswerNotification(answer)
-                speakInBackground(answer.take(500))
+                speakWithMicPaused(recorder, answer.take(500))
                 updateNotification("گوش‌به‌زنگ فعال است؛ بگو " + configuredWakePhrase())
             }
         } catch (e: Exception) {
@@ -211,6 +215,91 @@ class WakeWordService : Service() {
         val raw = getSharedPreferences("cht_ai", Context.MODE_PRIVATE)
             .getString("wake_phrase", "جارویس") ?: "جارویس"
         return normalizeSpeech(raw).ifBlank { "جارویس" }
+    }
+
+
+    private fun executeBackgroundPhoneAction(command: String): String? {
+        val q = normalizeSpeech(command).replace(Regex("\\s+"), " ").trim()
+        val smsMatch = Regex("""به\s+(.+?)\s+(?:پیام\s*بده|پیامک\s*بده|اس\s*ام\s*اس\s*بده)""").find(q)
+        val callMatch = Regex("""^(?:لطفا\s+)?(?:به|با)\s+(.+?)\s+(?:زنگ\s+بزن|تماس\s+بگیر|تلفن\s+کن)$""").find(q)
+        val isSms = smsMatch != null
+        val recipient = (smsMatch?.groupValues?.get(1) ?: callMatch?.groupValues?.get(1))?.trim() ?: return null
+        val body = if (isSms) Regex("""(?:بنویس|متن(?:ش)?(?:\s+این)?(?:\s+باشه)?|بگو)\s*[:：،,-]*\s*(.+)$""")
+            .find(q)?.groupValues?.get(1)?.trim().orEmpty() else ""
+        if (isSms && body.isBlank()) return "متن پیام مشخص نیست؛ بگو: به نام مخاطب پیام بده، بنویس متن پیام."
+        val required = if (isSms) android.Manifest.permission.SEND_SMS else android.Manifest.permission.CALL_PHONE
+        if (checkSelfPermission(required) != PackageManager.PERMISSION_GRANTED ||
+            checkSelfPermission(android.Manifest.permission.READ_CONTACTS) != PackageManager.PERMISSION_GRANTED) {
+            val action = if (isSms) "ارسال پیامک" else "تماس"
+            return "برای این کار مجوز مخاطبین و " + action + " لازم است؛ JARVIS را باز کن و مجوزها را فعال کن."
+        }
+        data class Contact(val name: String, val number: String, val score: Int)
+        val contacts = ArrayList<Contact>()
+        try {
+            val projection = arrayOf(ContactsContract.CommonDataKinds.Phone.DISPLAY_NAME, ContactsContract.CommonDataKinds.Phone.NUMBER)
+            contentResolver.query(ContactsContract.CommonDataKinds.Phone.CONTENT_URI, projection, null, null, null)?.use { cursor ->
+                val nameCol = cursor.getColumnIndexOrThrow(ContactsContract.CommonDataKinds.Phone.DISPLAY_NAME)
+                val numberCol = cursor.getColumnIndexOrThrow(ContactsContract.CommonDataKinds.Phone.NUMBER)
+                val target = recipient.replace(Regex("\\s+"), "")
+                while (cursor.moveToNext()) {
+                    val name = cursor.getString(nameCol).orEmpty()
+                    val number = cursor.getString(numberCol).orEmpty()
+                    val normalized = normalizeSpeech(name).replace(Regex("\\s+"), "")
+                    val score = when {
+                        normalized == target -> 100
+                        normalized.startsWith(target) || target.startsWith(normalized) -> 80
+                        normalized.contains(target) || target.contains(normalized) -> 60
+                        else -> 0
+                    }
+                    if (score > 0 && number.isNotBlank()) contacts.add(Contact(name, number, score))
+                }
+            }
+        } catch (_: Exception) {
+            return "خواندن مخاطبین ممکن نشد؛ مجوز مخاطبین را در تنظیمات JARVIS بررسی کن."
+        }
+        val matches = contacts.sortedByDescending { it.score }.distinctBy { it.number }
+        if (matches.isEmpty()) return "مخاطبی با نام " + recipient + " پیدا نکردم."
+        if (matches.size > 1 && matches[0].score <= matches[1].score) {
+            val names = matches.take(3).joinToString("، ") { it.name }
+            return "چند مخاطب با نام مشابه پیدا شد: " + names + ". برای جلوگیری از انتخاب اشتباه، JARVIS را باز کن و مخاطب را انتخاب کن."
+        }
+        val match = matches.first()
+        return try {
+            if (!isSms) {
+                val call = Intent(Intent.ACTION_CALL, Uri.parse("tel:" + Uri.encode(match.number)))
+                    .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                startActivity(call)
+                "درخواست تماس با " + match.name + " به گوشی سپرده شد؛ ممکن است محدودیت‌های اندروید مانع شروع خودکار شود."
+            } else {
+                val sms = if (android.os.Build.VERSION.SDK_INT >= 31) getSystemService(SmsManager::class.java) else SmsManager.getDefault()
+                val parts = sms.divideMessage(body)
+                val batchId = System.currentTimeMillis()
+                val callbacks = ArrayList<android.app.PendingIntent>()
+                for (index in parts.indices) {
+                    val callback = Intent(this, SmsSentReceiver::class.java)
+                        .setAction(SmsSentReceiver.ACTION_SMS_SENT)
+                        .putExtra(SmsSentReceiver.EXTRA_BATCH_ID, batchId)
+                        .putExtra(SmsSentReceiver.EXTRA_RECIPIENT, match.name)
+                        .putExtra(SmsSentReceiver.EXTRA_PART_COUNT, parts.size)
+                        .putExtra(SmsSentReceiver.EXTRA_PART_INDEX, index)
+                    callbacks.add(android.app.PendingIntent.getBroadcast(
+                        this, (batchId + index).toInt(), callback,
+                        android.app.PendingIntent.FLAG_UPDATE_CURRENT or android.app.PendingIntent.FLAG_MUTABLE
+                    ))
+                }
+                if (parts.size <= 1) sms.sendTextMessage(match.number, null, body, callbacks.first(), null)
+                else sms.sendMultipartTextMessage(match.number, null, parts, callbacks, null)
+                "پیامک به " + match.name + " برای ارسال ثبت شد؛ نتیجه ارسال در اعلان جداگانه نمایش داده می‌شود."
+            }
+        } catch (e: Exception) {
+            "اجرای فرمان برای " + match.name + " ناموفق بود: " + (e.message ?: "خطای گوشی")
+        }
+    }
+
+    private fun speakWithMicPaused(recorder: AudioRecord, message: String) {
+        try { if (recorder.recordingState == AudioRecord.RECORDSTATE_RECORDING) recorder.stop() } catch (_: Exception) {}
+        speakInBackground(message)
+        try { if (running.get() && recorder.state == AudioRecord.STATE_INITIALIZED) recorder.startRecording() } catch (_: Exception) {}
     }
 
     /** Uses the phone's installed Persian TTS engine for a short hands-free acknowledgement/answer. */
