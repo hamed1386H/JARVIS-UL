@@ -133,12 +133,13 @@ class WakeWordService : Service() {
 
                 val wakePhrase = configuredWakePhrase()
                 val wakeIndex = heard.indexOf(wakePhrase)
-                val hasWake = wakeIndex >= 0 || heard.contains("جارویس") || heard.contains("jarvis")
+                val hasWake = wakeIndex >= 0 || heard.contains("جارویس") || heard.contains("jarvis") || heard.contains("بیدار شو")
                 val command = if (hasWake) {
                     when {
                         wakeIndex >= 0 -> heard.substring(wakeIndex + wakePhrase.length).trim()
                         heard.contains("جارویس") -> heard.substringAfter("جارویس").trim()
-                        else -> heard.substringAfter("jarvis").trim()
+                        heard.contains("jarvis") -> heard.substringAfter("jarvis").trim()
+                        else -> heard.substringAfter("بیدار شو").trim()
                     }
                 } else ""
 
