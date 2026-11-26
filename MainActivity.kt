@@ -540,13 +540,13 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
             textSize = 13f
         }
         panel.addView(TextView(this).apply {
-            text = "برای صحبت فارسی با صدای مردانه، از مدل ElevenLabs v3 استفاده می‌شود. کلید Groq گفت‌وگو را انجام می‌دهد اما صدای فارسی تولید نمی‌کند. کلید صدا جداگانه است و فقط روی گوشی ذخیره می‌شود. شناسه پیش‌فرض Adam است."
+            text = "برای صحبت فارسی با صدای مردانه، از مدل ElevenLabs Multilingual v2 استفاده می‌شود. کلید Groq گفت‌وگو را انجام می‌دهد اما صدای فارسی تولید نمی‌کند. کلید صدا جداگانه است و فقط روی گوشی ذخیره می‌شود. شناسه پیش‌فرض Adam است."
             setTextColor(Color.LTGRAY); textSize = 13f
         })
         panel.addView(TextView(this).apply {
-            text = "دریافت کلید: elevenlabs.io/app/settings/api-keys"
+            text = "دریافت کلید: elevenlabs.io/app/developers/api-keys"
             setTextColor(Color.CYAN); textSize = 13f; setPadding(0, dp(8), 0, dp(8))
-            setOnClickListener { try { startActivity(Intent(Intent.ACTION_VIEW, Uri.parse("https://elevenlabs.io/app/settings/api-keys"))) } catch (_: Exception) {} }
+            setOnClickListener { try { startActivity(Intent(Intent.ACTION_VIEW, Uri.parse("https://elevenlabs.io/app/developers/api-keys"))) } catch (_: Exception) {} }
         })
         panel.addView(key); panel.addView(voice)
         AlertDialog.Builder(this).setTitle("صدای فارسی JARVIS").setView(panel)
