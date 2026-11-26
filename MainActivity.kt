@@ -1451,7 +1451,7 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
             setPadding(dp(20), dp(8), dp(20), dp(4))
         }
         val endpoint = EditText(this).apply {
-            hint = "آدرس سرویس یا endpoint کامل؛ مثل https://example.com یا https://example.com/v1/chat/completions"
+            hint = "آدرس API"
             setText(agentCore.endpoint())
             textSize = 13f
             setSingleLine(false)
@@ -1463,11 +1463,23 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
             textSize = 13f
         }
         val model = EditText(this).apply {
-            hint = "نام مدل سرویس"
+            hint = "مدل رایگان Groq"
             setText(agentCore.model())
             textSize = 13f
         }
-        panel.addView(TextView(this).apply { text = "اتصال آنلاین اختیاری است. آدرس باید endpoint سازگار با Chat Completions باشد؛ کلید فقط روی همین گوشی ذخیره می‌شود."; setTextColor(Color.LTGRAY); textSize = 13f })
+        panel.addView(TextView(this).apply {
+            text = "پیشنهاد رایگان: GroqCloud\\nآدرس و مدل از قبل تنظیم شده‌اند. فقط کلید API شخصی‌ات را وارد کن. کلید فقط روی همین گوشی ذخیره می‌شود و داخل APK قرار نمی‌گیرد."
+            setTextColor(Color.LTGRAY); textSize = 13f
+        })
+        panel.addView(TextView(this).apply {
+            text = "دریافت کلید رایگان Groq: console.groq.com/keys"
+            setTextColor(Color.CYAN); textSize = 13f
+            setPadding(0, dp(8), 0, dp(8))
+            setOnClickListener {
+                try { startActivity(Intent(Intent.ACTION_VIEW, Uri.parse("https://console.groq.com/keys"))) }
+                catch (_: Exception) { reply("برای دریافت کلید، آدرس console.groq.com/keys را باز کن.") }
+            }
+        })
         panel.addView(endpoint); panel.addView(key); panel.addView(model)
         AlertDialog.Builder(this).setTitle("موتور آنلاین JARVIS")
             .setView(panel)
