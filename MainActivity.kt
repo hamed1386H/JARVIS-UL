@@ -535,12 +535,12 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
             textSize = 13f
         }
         val voice = EditText(this).apply {
-            hint = "شناسه صدای مردانه (Voice ID)"
+            hint = "شناسه صدای مردانه (اختیاری؛ پیش‌فرض Adam)"
             setText(cloudTts.voiceId())
             textSize = 13f
         }
         panel.addView(TextView(this).apply {
-            text = "برای صحبت فارسی با صدای مردانه، از مدل ElevenLabs Multilingual v2 استفاده می‌شود. کلید Groq گفت‌وگو را انجام می‌دهد اما صدای فارسی تولید نمی‌کند. کلید صدا جداگانه است و فقط روی گوشی ذخیره می‌شود. شناسه پیش‌فرض Adam است."
+            text = "برای گفتار فارسی آنلاین از مدل Eleven v3 و صدای مردانه Adam استفاده می‌شود. صدای فارسی گوشی لازم نیست. کلید API فقط روی گوشی ذخیره می‌شود؛ شناسه پیش‌فرض به‌صورت خودکار تنظیم شده و معمولاً نیازی به تغییر آن نیست."
             setTextColor(Color.LTGRAY); textSize = 13f
         })
         panel.addView(TextView(this).apply {
