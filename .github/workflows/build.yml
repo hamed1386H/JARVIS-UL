@@ -47,7 +47,12 @@ jobs:
           from pathlib import Path
           p = Path('jarvis-source/app/src/main/AndroidManifest.xml')
           s = p.read_text()
-          q = '    <queries>\\n        <intent>\\n            <action android:name="android.speech.RecognitionService" />\\n        </intent>\\n    </queries>\\n'
+          q = """    <queries>
+                  <intent>
+                      <action android:name="android.speech.RecognitionService" />
+                  </intent>
+              </queries>
+          """
           if '<action android:name="android.speech.RecognitionService"' not in s:
               s = s.replace('</manifest>', q + '</manifest>')
               p.write_text(s)
