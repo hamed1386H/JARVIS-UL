@@ -59,6 +59,9 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
     private var selectedTtsEnginePackage = ""
     @Volatile private var pendingSpeech: String? = null
     private var wakeMode = false
+    @Volatile private var voiceSessionActive = false
+    private var voiceDialog: AlertDialog? = null
+    private var voiceOrb: JarvisOrbView? = null
     private val executor = Executors.newSingleThreadExecutor()
     // Keep continuous microphone capture/transcription off the AI/model worker queue.
     private val voiceExecutor = Executors.newSingleThreadExecutor()
@@ -173,7 +176,7 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
         })
         val orbStage = FrameLayout(this).apply { clipChildren = false; clipToPadding = false }
         orbView = JarvisOrbView(this)
-        orbView.setOnClickListener { beginListening() }
+        orbView.setOnClickListener { toggleVoiceConversation() }
         orbStage.addView(orbView, FrameLayout.LayoutParams(-1, -1))
         root.addView(orbStage, LinearLayout.LayoutParams(-1, 0, 1f))
         status = TextView(this).apply {
@@ -276,6 +279,7 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
 
     private fun setJarvisMode(mode: JarvisOrbView.Mode) {
         if (::orbView.isInitialized) orbView.setMode(mode)
+        voiceOrb?.setMode(mode)
         if (!::dynamicIsland.isInitialized) return
         val label = when (mode) {
             JarvisOrbView.Mode.IDLE -> "●  JARVIS  ·  آماده‌باش"
@@ -652,6 +656,54 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
         super.onPause()
     }
 
+    private fun toggleVoiceConversation() {
+        if (voiceSessionActive) {
+            voiceSessionActive = false
+            androidRecognitionActive = false
+            destroySpeechRecognizer()
+            try { tts.stop() } catch (_: Exception) {}
+            try { cloudPlayer?.stop(); cloudPlayer?.release() } catch (_: Exception) {}
+            cloudPlayer = null
+            voiceDialog?.dismiss()
+            voiceDialog = null
+            voiceOrb = null
+            setJarvisMode(JarvisOrbView.Mode.IDLE)
+            status.text = "مکالمه صوتی بسته شد؛ به گفتگوی متنی برگشتی."
+            return
+        }
+        if (ContextCompat.checkSelfPermission(this, Manifest.permission.RECORD_AUDIO) != PackageManager.PERMISSION_GRANTED) {
+            ActivityCompat.requestPermissions(this, arrayOf(Manifest.permission.RECORD_AUDIO), requestMic)
+            return
+        }
+        voiceSessionActive = true
+        val panel = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            gravity = Gravity.CENTER
+            setPadding(dp(18), dp(12), dp(18), dp(16))
+            setBackgroundColor(Color.rgb(3, 7, 20))
+        }
+        val orb = JarvisOrbView(this).also { voiceOrb = it }
+        panel.addView(orb, LinearLayout.LayoutParams(-1, dp(300)))
+        panel.addView(TextView(this).apply {
+            text = "مکالمه زنده فعال است"
+            textSize = 15f; gravity = Gravity.CENTER
+            setTextColor(Color.rgb(105, 235, 190))
+            setPadding(0, dp(8), 0, dp(14))
+        })
+        panel.addView(Button(this).apply {
+            text = "پایان مکالمه"; isAllCaps = false
+            setOnClickListener { toggleVoiceConversation() }
+        }, LinearLayout.LayoutParams(-1, dp(50)))
+        voiceDialog = AlertDialog.Builder(this)
+            .setTitle("JARVIS · مکالمه صوتی زنده")
+            .setView(panel)
+            .setOnCancelListener { if (voiceSessionActive) toggleVoiceConversation() }
+            .create()
+        voiceDialog?.show()
+        voiceDialog?.window?.setLayout((resources.displayMetrics.widthPixels * 0.92f).toInt(), -2)
+        beginListening()
+    }
+
     private fun beginListening() {
         if (ContextCompat.checkSelfPermission(this, Manifest.permission.RECORD_AUDIO) != PackageManager.PERMISSION_GRANTED) {
             ActivityCompat.requestPermissions(this, arrayOf(Manifest.permission.RECORD_AUDIO), requestMic)
@@ -731,8 +783,10 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
                         destroySpeechRecognizer()
                         if (text.length >= 2) {
                             if (::orbView.isInitialized) orbView.setAudioLevel(0f)
-                            addLog("شما", text)
-                            addConversationMessage("user", text)
+                            if (!voiceSessionActive) {
+                                addLog("شما", text)
+                                addConversationMessage("user", text)
+                            }
                             handleCommand(text)
                         } else {
                             status.text = "متنی از گفتار دریافت نشد؛ تشخیص آفلاین را امتحان می‌کنم…"
@@ -866,7 +920,7 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
                     runOnUiThread {
                         if (!activityVisible) return@runOnUiThread
                         if (words.isNotBlank() && words.length >= 2) {
-                            addLog("شما", words)
+                            if (!voiceSessionActive) addLog("شما", words)
                             handleCommand(words)
                         } else {
                             status.text = "گفتار واضحی تشخیص داده نشد؛ دوباره امتحان کن."
@@ -1287,6 +1341,11 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
         }
         val googleQuery = extractGoogleSearchQuery(raw)
         if (!googleQuery.isNullOrBlank()) { openGoogleSearch(googleQuery); return }
+        if (q.contains("هواشناسی") || q.contains("آب و هوا") || q.contains("اب و هوا") || q.contains("وضعیت هوا")) {
+            val place = Regex("""(?:در|برای|شهر)\s+(.+?)(?:\s+(?:رو|را)?\s*(?:چک کن|بررسی کن))?$""").find(q)?.groupValues?.get(1)?.trim().orEmpty()
+            openGoogleSearch(if (place.isBlank()) "هواشناسی امروز" else "هواشناسی $place")
+            return
+        }
         val callRecipient = parseCallRequest(raw)
         if (!callRecipient.isNullOrBlank()) { beginContactAction(callRecipient, "", "call"); return }
         val smsRequest = parseSmsRequest(raw)
@@ -2099,6 +2158,10 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
 
     private fun finishSpeechTurn() {
         if (::orbView.isInitialized) { orbView.setAudioLevel(0f); setJarvisMode(JarvisOrbView.Mode.IDLE) }
+        if (voiceSessionActive && activityVisible && !isFinishing) {
+            android.os.Handler(mainLooper).postDelayed({ if (voiceSessionActive && activityVisible && !isFinishing) beginListening() }, 350)
+            return
+        }
         if (wakePromptPending && activityVisible && !isFinishing) {
             wakePromptPending = false
             wakeCommandInProgress = true
