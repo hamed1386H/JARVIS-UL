@@ -1389,7 +1389,7 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
 
     private fun handleCommand(raw: String) {
         val q = normalize(raw).trim()
-        if (q == "جارویس" || q == "هی جارویس" || q == "سلام جارویس" ||
+        if (q == "جارویس" || q == "هی جارویس" || q == "سلام جارویس" || q == "بیدار شو" || q == "بیدار" ||
             q == "جارویس بیدار شو" || q == "جارویس گوش کن") {
             reply("در خدمتم")
             return
