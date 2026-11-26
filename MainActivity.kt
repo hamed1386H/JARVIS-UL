@@ -507,7 +507,7 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
     }
 
     private fun showBackgroundPersistenceOptions() {
-        val choices = arrayOf("حذف محدودیت بهینه‌سازی باتری", "باز کردن تنظیمات شروع خودکار شیائومی", "صفحه اطلاعات برنامه")
+        val choices = arrayOf("حذف محدودیت بهینه‌سازی باتری", "باز کردن تنظیمات شروع خودکار شیائومی", "اجازه نمایش JARVIS روی صفحه قفل", "صفحه اطلاعات برنامه")
         AlertDialog.Builder(this).setTitle("پایداری JARVIS")
             .setItems(choices) { _, which ->
                 when (which) {
@@ -529,6 +529,12 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
                             }
                             startActivity(intent)
                         } catch (_: Exception) { openAppDetails() }
+                    }
+                    2 -> {
+                        if (android.os.Build.VERSION.SDK_INT >= 34) {
+                            try { startActivity(Intent(Settings.ACTION_MANAGE_APP_USE_FULL_SCREEN_INTENT, Uri.parse("package:$packageName"))) }
+                            catch (_: Exception) { openAppDetails() }
+                        } else reply("این مجوز در نسخه اندروید گوشی تو نیاز نیست.")
                     }
                     else -> openAppDetails()
                 }
@@ -702,6 +708,9 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
                 putExtra(RecognizerIntent.EXTRA_LANGUAGE, "fa-IR")
                 putExtra(RecognizerIntent.EXTRA_LANGUAGE_PREFERENCE, "fa-IR")
                 putExtra(RecognizerIntent.EXTRA_PARTIAL_RESULTS, true)
+                putExtra(RecognizerIntent.EXTRA_SPEECH_INPUT_COMPLETE_SILENCE_LENGTH_MILLIS, 700L)
+                putExtra(RecognizerIntent.EXTRA_SPEECH_INPUT_POSSIBLY_COMPLETE_SILENCE_LENGTH_MILLIS, 450L)
+                putExtra(RecognizerIntent.EXTRA_SPEECH_INPUT_MINIMUM_LENGTH_MILLIS, 250L)
                 putExtra(RecognizerIntent.EXTRA_MAX_RESULTS, 1)
                 putExtra(RecognizerIntent.EXTRA_PREFER_OFFLINE, false)
             }
