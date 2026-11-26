@@ -33,14 +33,14 @@
       <form id="composer" class="composer">
         <button type="button" id="micBtn" class="mic-btn" aria-label="صحبت کردن">⌁</button>
         <input id="messageInput" autocomplete="off" maxlength="8000" placeholder="پیامت را برای جارویس بنویس..." aria-label="پیام">
-        <button class="send-btn" type="submit" aria-label="ارسال">➤</button>
+        <button id="sendBtn" class="send-btn" type="submit" aria-label="ارسال">➤</button>
       </form>
       <div class="footnote">مکالمات با مغز مرکزی جارویس همگام می‌شوند.</div>
     </section>
     <footer>JARVIS WEB <span>•</span> نسخه آزمایشی</footer>
   </main>
 
-  <dialog id="loginDialog" class="dialog" open>
+  <dialog id="loginDialog" class="dialog">
     <form id="loginForm" class="dialog-card">
       <div class="dialog-symbol">J</div><h2>ورود به جارویس</h2><p>رمز دسترسی سرور را وارد کن.</p>
       <input id="passwordInput" type="password" autocomplete="current-password" placeholder="رمز دسترسی" required>
