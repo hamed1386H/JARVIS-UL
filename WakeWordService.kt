@@ -221,7 +221,7 @@ class WakeWordService : Service() {
 
 
     private fun executeBackgroundNavigation(command: String): String? {
-        val q = normalizeSpeech(command).replace(Regex("\s+"), " ").trim()
+        val q = normalizeSpeech(command).replace(Regex("""\s+"""), " ").trim()
         val weather = q.contains("هواشناسی") || q.contains("آب و هوا") || q.contains("اب و هوا") || q.contains("وضعیت هوا")
         val searchMatch = Regex("""(?:در\s+گوگل\s+)?(?:جستجو کن|جست‌وجو کن|بگرد|سرچ کن)\s*(?:برای|دنبال)?\s*(.*)$""").find(q)
         if (weather || searchMatch != null) {
@@ -242,7 +242,7 @@ class WakeWordService : Service() {
             ?: return null
         return try {
             val installed = packageManager.getInstalledApplications(PackageManager.GET_META_DATA)
-            val target = appTarget.replace(Regex("\\\s+"), "")
+            val target = appTarget.replace(Regex("""\s+"""), "")
             val candidates = installed.mapNotNull { info ->
                 val label = packageManager.getApplicationLabel(info).toString()
                 val normalized = normalizeSpeech(label).replace(Regex("\\\s+"), "")
