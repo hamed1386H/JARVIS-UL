@@ -175,7 +175,7 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
             setTextColor(Color.rgb(245, 244, 255)); typeface = Typeface.create("sans-serif-light", Typeface.NORMAL)
         }
         header.addView(brand, LinearLayout.LayoutParams(0, -2, 1f))
-        header.addView(actionButton("⚙", "تنظیمات JARVIS") { showJarvisSettings() }, LinearLayout.LayoutParams(dp(48), dp(44)))
+        header.addView(actionButton("⚙", "تنظیمات JARVIS") { openJarvisSettingsSafely() }, LinearLayout.LayoutParams(dp(48), dp(44)))
         root.addView(header)
         dynamicIsland = TextView(this).apply {
             text = "●  JARVIS  ·  آماده‌باش"; textSize = 11f; letterSpacing = 0.04f; gravity = Gravity.CENTER
@@ -274,13 +274,13 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
         setContentView(root)
     }
 
-    private fun showJarvisMenu() {
+    private fun openJarvisSettingsSafely() {\n        try { showJarvisSettings() } catch (e: Exception) {\n            Toast.makeText(this, "باز کردن تنظیمات ممکن نشد؛ دوباره تلاش کن.", Toast.LENGTH_LONG).show()\n        }\n    }\n\n    private fun showJarvisMenu() {
         val items = arrayOf("خانه و دستیار صوتی", "گفتگوی متنی", "تنظیمات", "برنامه‌های گوشی", "درباره JARVIS")
         AlertDialog.Builder(this).setTitle("منوی JARVIS").setItems(items) { _, which ->
             when (which) {
                 0 -> { setJarvisMode(JarvisOrbView.Mode.IDLE); status.text = "برای صحبت، روی گوی نورانی بزن" }
                 1 -> status.text = "برای باز کردن گفتگوی متنی، دکمه «چت» پایین صفحه را بزن"
-                2 -> showJarvisSettings()
+                2 -> openJarvisSettingsSafely()
                 3 -> showApps()
                 4 -> AlertDialog.Builder(this).setTitle("درباره JARVIS")
                     .setMessage("دستیار هوشمند صوتی و متنی فارسی\nبا پشتیبانی از مدل محلی و موتور آنلاین اختیاری.")
@@ -1504,7 +1504,7 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
             reply("در خدمتم")
             return
         }
-        val googleQuery = extractGoogleSearchQuery(raw)
+        if (q.contains("تنظیمات جارویس") || q.contains("تنظیمات خودت") || q.contains("تنظیمات داخلی") || q == "تنظیمات دستیار") {\n            openJarvisSettingsSafely()\n            reply("مرکز تنظیمات جارویس باز شد.")\n            return\n        }\n        val googleQuery = extractGoogleSearchQuery(raw)
         if (!googleQuery.isNullOrBlank()) { openGoogleSearch(googleQuery); return }
         if (q.contains("هواشناسی") || q.contains("آب و هوا") || q.contains("اب و هوا") || q.contains("وضعیت هوا")) {
             val place = Regex("""(?:در|برای|شهر)\s+(.+?)(?:\s+(?:رو|را)?\s*(?:چک کن|بررسی کن))?$""").find(q)?.groupValues?.get(1)?.trim().orEmpty()
