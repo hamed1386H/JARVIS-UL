@@ -12,8 +12,9 @@ import android.os.IBinder
 import androidx.core.app.NotificationCompat
 import java.io.File
 import java.util.concurrent.atomic.AtomicBoolean
+import kotlin.math.sqrt
 
-/** Local-only wake listener. No Android/Google SpeechRecognizer is used. */
+/** Local-only wake listener. Uses short overlapping windows and voice-activity gating. */
 class WakeWordService : Service() {
     private val running = AtomicBoolean(false)
     private var worker: Thread? = null
@@ -35,7 +36,8 @@ class WakeWordService : Service() {
 
     private fun createChannel() {
         if (Build.VERSION.SDK_INT >= 26) {
-            val channel = NotificationChannel(channelId, "گوش‌به‌زنگ JARVIS", NotificationManager.IMPORTANCE_HIGH).apply { lockscreenVisibility = Notification.VISIBILITY_PUBLIC }
+            val channel = NotificationChannel(channelId, "گوش‌به‌زنگ JARVIS", NotificationManager.IMPORTANCE_HIGH)
+                .apply { lockscreenVisibility = Notification.VISIBILITY_PUBLIC }
             getSystemService(NotificationManager::class.java).createNotificationChannel(channel)
         }
     }
@@ -45,80 +47,122 @@ class WakeWordService : Service() {
             flags = Intent.FLAG_ACTIVITY_SINGLE_TOP or Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_NEW_TASK
             if (wakeDetected) putExtra(MainActivity.EXTRA_WAKE_DETECTED, true)
         }
-        val content = PendingIntent.getActivity(this, 7702, open, PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE)
+        val content = PendingIntent.getActivity(this, 7702, open,
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE)
         val stop = Intent(this, WakeWordService::class.java).setAction(ACTION_STOP)
-        val stopPending = PendingIntent.getService(this, 7703, stop, PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE)
+        val stopPending = PendingIntent.getService(this, 7703, stop,
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE)
         return NotificationCompat.Builder(this, channelId)
             .setSmallIcon(android.R.drawable.ic_btn_speak_now)
-            .setContentTitle("JARVIS فعال است")
+            .setContentTitle(if (wakeDetected) "JARVIS صدایت را شنید" else "JARVIS فعال است")
             .setContentText(message)
             .setContentIntent(content)
             .setOngoing(true)
             .setOnlyAlertOnce(!wakeDetected)
             .setCategory(NotificationCompat.CATEGORY_CALL)
             .setPriority(if (wakeDetected) NotificationCompat.PRIORITY_MAX else NotificationCompat.PRIORITY_LOW)
+            // On supported lock screens this brings the command screen forward.
             .setFullScreenIntent(content, wakeDetected)
             .addAction(android.R.drawable.ic_media_pause, "توقف گوش‌به‌زنگ", stopPending)
             .build()
     }
 
-    private fun updateNotification(message: String) {
-        getSystemService(NotificationManager::class.java).notify(notificationId, buildNotification(message))
+    private fun updateNotification(message: String, wakeDetected: Boolean = false) {
+        getSystemService(NotificationManager::class.java)
+            .notify(notificationId, buildNotification(message, wakeDetected))
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         if (intent?.action == ACTION_STOP) {
+            running.set(false)
             stopSelf()
             return START_NOT_STICKY
         }
         if (running.compareAndSet(false, true)) {
-            worker = Thread { localWakeLoop() }.also { it.name = "Jarvis-Local-Wake"; it.start() }
+            worker = Thread { localWakeLoop() }.also {
+                it.name = "Jarvis-Local-Wake"
+                it.start()
+            }
         }
         return START_STICKY
     }
 
     private fun localWakeLoop() {
-        val model = File(getExternalFilesDir(Environment.DIRECTORY_DOWNLOADS) ?: File(filesDir, "models"), "ggml-base.bin")
+        val model = File(getExternalFilesDir(Environment.DIRECTORY_DOWNLOADS)
+            ?: File(filesDir, "models"), "ggml-base.bin")
         if (!model.isFile || model.length() < 50_000_000L) {
             updateNotification("برای گوش‌به‌زنگ آفلاین، ابتدا مدل Whisper را در JARVIS دانلود کن")
             running.set(false)
             stopSelf()
             return
         }
+
         val engine = WhisperEngine()
         var recorder: AudioRecord? = null
         try {
             engine.load(model.absolutePath)
             val rate = 16000
-            val min = AudioRecord.getMinBufferSize(rate, AudioFormat.CHANNEL_IN_MONO, AudioFormat.ENCODING_PCM_16BIT)
-            check(min > 0)
-            recorder = AudioRecord(MediaRecorder.AudioSource.VOICE_RECOGNITION, rate, AudioFormat.CHANNEL_IN_MONO, AudioFormat.ENCODING_PCM_16BIT, maxOf(min, 12800))
-            check(recorder.state == AudioRecord.STATE_INITIALIZED)
+            val min = AudioRecord.getMinBufferSize(rate, AudioFormat.CHANNEL_IN_MONO,
+                AudioFormat.ENCODING_PCM_16BIT)
+            check(min > 0) { "میکروفون ۱۶ کیلوهرتز در دسترس نیست." }
+            recorder = AudioRecord(MediaRecorder.AudioSource.VOICE_RECOGNITION, rate,
+                AudioFormat.CHANNEL_IN_MONO, AudioFormat.ENCODING_PCM_16BIT,
+                maxOf(min, 12800))
+            check(recorder.state == AudioRecord.STATE_INITIALIZED) { "میکروفون آماده نشد." }
             recorder.startRecording()
-            updateNotification("گوش‌به‌زنگ آفلاین فعال است؛ بگو جارویس")
-            val chunk = ShortArray(rate * 2)
+            updateNotification("گوش‌به‌زنگ سریع آفلاین فعال است؛ بگو جارویس")
+
+            // Keep a rolling 2-second window, refreshed every 0.5 seconds.
+            // Whisper is not invoked during silence, avoiding repeated expensive empty decodes.
+            val windowSize = rate * 2
+            val ring = ShortArray(windowSize)
+            val readBuffer = ShortArray(3200) // 200 ms
+            var writeAt = 0
+            var samplesSeen = 0
+            var nextCheckAt = windowSize
             while (running.get()) {
-                var offset = 0
-                while (offset < chunk.size && running.get()) {
-                    val n = recorder.read(chunk, offset, chunk.size - offset)
-                    if (n > 0) offset += n
+                val n = recorder.read(readBuffer, 0, readBuffer.size)
+                if (n == AudioRecord.ERROR_INVALID_OPERATION || n == AudioRecord.ERROR_BAD_VALUE ||
+                    n == AudioRecord.ERROR_DEAD_OBJECT) {
+                    throw IllegalStateException("ارتباط میکروفون قطع شد.")
                 }
-                if (!running.get()) break
-                val samples = FloatArray(offset) { chunk[it].toFloat() / 32768f }
-                val heard = engine.transcribe(samples).lowercase()
+                if (n <= 0) continue
+                for (i in 0 until n) {
+                    ring[writeAt] = readBuffer[i]
+                    writeAt = (writeAt + 1) % windowSize
+                }
+                samplesSeen += n
+                if (samplesSeen < nextCheckAt) continue
+                nextCheckAt = samplesSeen + rate / 2
+
+                // RMS voice gate. Ignore silence and low-level microphone noise.
+                var energy = 0.0
+                for (sample in ring) {
+                    val v = sample.toDouble()
+                    energy += v * v
+                }
+                val rms = sqrt(energy / windowSize) / 32768.0
+                if (rms < 0.008) continue
+
+                val audio = FloatArray(windowSize)
+                for (i in 0 until windowSize) {
+                    audio[i] = ring[(writeAt + i) % windowSize].toFloat() / 32768f
+                }
+                val heard = engine.transcribe(audio).lowercase()
                     .replace("ي", "ی").replace("ك", "ک")
-                if (listOf("جارویس", "هی جارویس", "جارویس بیدار شو", "جارویس گوش کن").any { heard.contains(it) }) {
-                    // Release the microphone before the Activity starts command recognition.
-                    // The foreground service remains alive; MainActivity restarts the listener
-                    // after JARVIS has finished speaking the command response.
+                    .replace(" ", "").replace("‌", "")
+                if (heard.contains("جارویس") || heard.contains("جارويس") ||
+                    heard.contains("jarvis")) {
+                    // Trigger a high-priority full-screen notification as well as a broadcast.
+                    // The broadcast handles the foreground case; the notification handles lock-screen wake.
                     running.set(false)
-                    updateNotification("جارویس بیدار شد؛ منتظر فرمان صوتی")
+                    updateNotification("جارویس بیدار شد؛ فرمانت را بگو", wakeDetected = true)
                     sendBroadcast(Intent(ACTION_WAKE_DETECTED).setPackage(packageName))
                     break
                 }
             }
         } catch (e: Exception) {
-            updateNotification("گوش‌به‌زنگ محلی متوقف شد: ${e.message ?: "خطا"}")
+            updateNotification("گوش‌به‌زنگ متوقف شد: ${e.message ?: "خطای میکروفون"}")
             running.set(false)
         } finally {
             try { recorder?.stop() } catch (_: Exception) {}
@@ -136,6 +180,7 @@ class WakeWordService : Service() {
     }
 
     override fun onBind(intent: Intent?): IBinder? = null
+
     companion object {
         const val ACTION_STOP = "com.chtai.assistant.STOP_WAKE"
         const val ACTION_WAKE_DETECTED = "com.chtai.assistant.WAKE_DETECTED"
