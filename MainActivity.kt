@@ -40,7 +40,7 @@ import java.util.Locale
 import java.util.concurrent.Executors
 import kotlin.math.roundToInt
 
-class MainActivity : Activity(), TextToSpeech.OnInitListener {
+// JARVIS 1.4.4: voice settings access and resilient Persian speech handling.\nclass MainActivity : Activity(), TextToSpeech.OnInitListener {
     private lateinit var status: TextView
     private lateinit var orbView: JarvisOrbView
     private lateinit var dynamicIsland: TextView
