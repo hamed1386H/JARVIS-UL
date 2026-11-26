@@ -1,5 +1,6 @@
 #include <jni.h>
 #include <string>
+#include <algorithm>
 #include <vector>
 #include "whisper.h"
 
@@ -28,7 +29,7 @@ Java_com_chtai_assistant_WhisperEngine_nativeTranscribe(JNIEnv *env, jobject, jl
     params.print_progress = false;
     params.print_realtime = false;
     params.print_timestamps = false;
-    params.n_threads = threads > 0 ? threads : 4;
+    params.n_threads = threads > 0 ? std::min(threads, 2) : 2;
     const int result = whisper_full(ctx, params, audio, count);
     env->ReleaseFloatArrayElements(samples, audio, JNI_ABORT);
     if (result != 0) return env->NewStringUTF("");
