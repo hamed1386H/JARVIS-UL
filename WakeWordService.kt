@@ -41,7 +41,9 @@ class WakeWordService : Service() {
     }
 
     private fun buildNotification(message: String, wakeDetected: Boolean = false): Notification {
-        val open = Intent(this, MainActivity::class.java).apply {\n            flags = Intent.FLAG_ACTIVITY_SINGLE_TOP or Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_NEW_TASK\n            if (wakeDetected) putExtra(MainActivity.EXTRA_WAKE_DETECTED, true)
+        val open = Intent(this, MainActivity::class.java).apply {
+            flags = Intent.FLAG_ACTIVITY_SINGLE_TOP or Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_NEW_TASK
+            if (wakeDetected) putExtra(MainActivity.EXTRA_WAKE_DETECTED, true)
         }
         val content = PendingIntent.getActivity(this, 7702, open, PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE)
         val stop = Intent(this, WakeWordService::class.java).setAction(ACTION_STOP)
