@@ -102,8 +102,11 @@ class WakeWordService : Service() {
                 val heard = engine.transcribe(samples).lowercase()
                     .replace("ي", "ی").replace("ك", "ک")
                 if (listOf("جارویس", "هی جارویس", "جارویس بیدار شو", "جارویس گوش کن").any { heard.contains(it) }) {
+                    // Release the microphone before the Activity starts command recognition.
+                    // The foreground service remains alive; MainActivity restarts the listener
+                    // after JARVIS has finished speaking the command response.
                     running.set(false)
-                    updateNotification("جارویس بیدار شد؛ پاسخ می‌دهد")
+                    updateNotification("جارویس بیدار شد؛ منتظر فرمان صوتی")
                     sendBroadcast(Intent(ACTION_WAKE_DETECTED).setPackage(packageName))
                     break
                 }
