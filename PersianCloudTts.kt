@@ -11,13 +11,15 @@ class PersianCloudTts(context: Context) {
     private val prefs = context.getSharedPreferences("jarvis_persian_tts", Context.MODE_PRIVATE)
     fun apiKey(): String = prefs.getString("api_key", "") ?: ""
     fun voiceId(): String {
+        // Never force an English/British preset for Persian speech. Use the phone's
+        // fa-IR TTS voice by default; cloud voice is optional only when the user
+        // explicitly supplies a Persian-compatible ElevenLabs Voice ID.
         val saved = prefs.getString("voice_id", null)
-        val jarvisVoice = "JBFqnCBsd6RMkjVDRZzb"
-        if (saved.isNullOrBlank() || saved == "pNInz6obpgDQGcFmaJgB") {
-            prefs.edit().putString("voice_id", jarvisVoice).apply()
-            return jarvisVoice
+        if (saved == "JBFqnCBsd6RMkjVDRZzb" || saved == "pNInz6obpgDQGcFmaJgB") {
+            prefs.edit().putString("voice_id", "").apply()
+            return ""
         }
-        return saved
+        return saved.orEmpty()
     }
     fun saveConfig(key: String, voice: String) {
         prefs.edit().putString("api_key", key.trim()).putString("voice_id", voice.trim()).apply()
