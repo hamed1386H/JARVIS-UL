@@ -6,6 +6,7 @@ import android.content.Intent
 import android.provider.ContactsContract
 import android.net.Uri
 import android.telephony.SmsManager
+import android.telecom.TelecomManager
 import android.content.pm.PackageManager
 import android.media.AudioFormat
 import android.media.AudioRecord
@@ -312,10 +313,16 @@ class WakeWordService : Service() {
         val match = matches.first()
         return try {
             if (!isSms) {
-                val call = Intent(Intent.ACTION_CALL, Uri.parse("tel:" + Uri.encode(match.number)))
-                    .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-                startActivity(call)
-                "درخواست تماس با " + match.name + " به گوشی سپرده شد؛ ممکن است محدودیت‌های اندروید مانع شروع خودکار شود."
+                if (android.os.Build.VERSION.SDK_INT >= 28) {
+                    val telecom = getSystemService(TelecomManager::class.java)
+                        ?: throw IllegalStateException("سرویس تماس گوشی در دسترس نیست")
+                    telecom.placeCall(Uri.fromParts("tel", match.number, null), android.os.Bundle())
+                } else {
+                    val call = Intent(Intent.ACTION_CALL, Uri.parse("tel:" + Uri.encode(match.number)))
+                        .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                    startActivity(call)
+                }
+                "درخواست تماس با " + match.name + " به سرویس تماس گوشی سپرده شد."
             } else {
                 val sms = if (android.os.Build.VERSION.SDK_INT >= 31) getSystemService(SmsManager::class.java) else SmsManager.getDefault()
                 val parts = sms.divideMessage(body)
