@@ -593,7 +593,13 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
     }
 
     private fun requestCorePermissionsNow() {
-        val requested = mutableListOf(Manifest.permission.RECORD_AUDIO, Manifest.permission.CAMERA)
+        val requested = mutableListOf(
+            Manifest.permission.RECORD_AUDIO,
+            Manifest.permission.CAMERA,
+            Manifest.permission.READ_CONTACTS,
+            Manifest.permission.CALL_PHONE,
+            Manifest.permission.SEND_SMS
+        )
         if (android.os.Build.VERSION.SDK_INT >= 33) requested.add(Manifest.permission.POST_NOTIFICATIONS)
         val missing = requested.distinct().filter { ContextCompat.checkSelfPermission(this, it) != PackageManager.PERMISSION_GRANTED }
         if (missing.isEmpty()) {
