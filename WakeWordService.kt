@@ -437,7 +437,7 @@ class WakeWordService : Service() {
 
     private fun answerInBackground(command: String): String {
         val agent = JarvisAgentCore(this)
-        if (agent.isOnlineConfigured()) {
+        if (agent.isOnlineConfigured() && getSharedPreferences("cht_ai", Context.MODE_PRIVATE).getBoolean("online_ai_enabled", true)) {
             try {
                 return agent.askOnline(
                     "به عنوان JARVIS به این درخواست کاربر کوتاه، دقیق و به فارسی پاسخ بده. " +
@@ -451,7 +451,7 @@ class WakeWordService : Service() {
 
         val modelFile = File(getExternalFilesDir(Environment.DIRECTORY_DOWNLOADS)
             ?: File(filesDir, "models"), "Qwen_Qwen3-1.7B-Q4_K_M.gguf")
-        if (modelFile.isFile) {
+        if (getSharedPreferences("cht_ai", Context.MODE_PRIVATE).getBoolean("local_ai_enabled", true) && modelFile.isFile) {
             try {
                 // Keep Qwen loaded between commands: first response pays model-load cost,
                 // following responses avoid reloading the multi-gigabyte model.
