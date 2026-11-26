@@ -57,6 +57,7 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
     @Volatile private var androidRecognitionActive = false
     private var ttsReady = false
     private var selectedTtsEnginePackage = ""
+    private var ttsFallbackAttempted = false
     @Volatile private var pendingSpeech: String? = null
     private var wakeMode = false
     @Volatile private var voiceSessionActive = false
@@ -1541,16 +1542,16 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
     }
 
 
-    // SMS is deliberately handed to the system messaging app; JARVIS never sends silently.
+    // SMS is sent directly only after Android grants SEND_SMS; otherwise the composer is opened.
     private fun parseSmsRequest(raw: String): Pair<String, String>? {
-        val q = normalize(raw).replace(Regex("[،,؛;]+"), " ").replace(Regex("\\s+"), " ").trim()
+        val q = normalize(raw).replace(Regex("[،,؛;]+"), " ").replace(Regex("\s+"), " ").trim()
         val recipientPatterns = listOf(
-            Regex("""به\\s+(.+?)\\s+(?:پیام\\s*بده|پیامک\\s*بده|اس\\s*ام\\s*اس\\s*بده)"""),
-            Regex("""(?:پیام|پیامک)\\s+به\\s+(.+?)\\s+(?:بده|ارسال\\s+کن)""")
+            Regex("""به\s+(.+?)\s+(?:پیام\s*بده|پیامک\s*بده|اس\s*ام\s*اس\s*بده)"""),
+            Regex("""(?:پیام|پیامک)\s+به\s+(.+?)\s+(?:بده|ارسال\s+کن)""")
         )
         val recipientMatch = recipientPatterns.firstNotNullOfOrNull { it.find(q) } ?: return null
         val recipient = recipientMatch.groupValues[1].trim().trim(',', '،', '.', '!')
-        val bodyMatch = Regex("""(?:و\\s*)?(?:بنویس|متن(?:ش)?(?:\\s+این)?(?:\\s+باشه)?|بگو|بفرست)\\s*[:：،,-]*\\s*(.+)$""").find(q)
+        val bodyMatch = Regex("""(?:و\s*)?(?:بنویس|متن(?:ش)?(?:\s+این)?(?:\s+باشه)?|بگو|بفرست)\s*[:：،,-]*\s*(.+)$""").find(q)
         val body = bodyMatch?.groupValues?.get(1)?.trim()?.removePrefix("مثلا ")?.removePrefix("مثلاً ").orEmpty()
         if (recipient.isBlank() || body.isBlank()) {
             reply("نام مخاطب یا متن پیام کامل نیست. مثال: به علی پیام بده، بگو کجایی؟")
@@ -1560,7 +1561,7 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
     }
 
     private fun parseCallRequest(raw: String): String? {
-        val q = normalize(raw).replace(Regex("\\s+"), " ").trim()
+        val q = normalize(raw).replace(Regex("\s+"), " ").trim()
         val patterns = listOf(Regex("""^(?:لطفا\s+)?به\s+(.+?)\s+(?:زنگ\s+بزن|تماس\s+بگیر|تلفن\s+کن)$"""), Regex("""^(?:لطفا\s+)?با\s+(.+?)\s+(?:تماس\s+بگیر|زنگ\s+بزن)$"""))
         return patterns.firstNotNullOfOrNull { it.find(q)?.groupValues?.get(1)?.trim() }
     }
@@ -1584,7 +1585,7 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
                 val ni = cur.getColumnIndexOrThrow(ContactsContract.CommonDataKinds.Phone.DISPLAY_NAME); val pi = cur.getColumnIndexOrThrow(ContactsContract.CommonDataKinds.Phone.NUMBER)
                 while (cur.moveToNext()) {
                     val name = cur.getString(ni).orEmpty(); val number = cur.getString(pi).orEmpty()
-                    val n = normalize(name).replace(Regex("\\s+"), ""); val t = normalize(recipient).replace(Regex("\\s+"), "")
+                    val n = normalize(name).replace(Regex("\s+"), ""); val t = normalize(recipient).replace(Regex("\s+"), "")
                     val score = when { n == t -> 100; n.startsWith(t) || t.startsWith(n) -> 80; n.contains(t) || t.contains(n) -> 60; else -> 0 }
                     if (score > 0 && number.isNotBlank()) matches.add(Match(name, number, score))
                 }
@@ -1665,7 +1666,7 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
     private fun extractAppLaunchTarget(command: String): String? {
         var q = command.trim()
             .replace(Regex("^(لطفا|لطفاً|خواهشا|خواهشاً|جارویس|jarvis)[،, ]+"), "")
-            .replace(Regex("\\s+"), " ")
+            .replace(Regex("\s+"), " ")
         val openVerbs = listOf("باز کن", "بازکن", "اجرا کن", "اجراکن", "راه اندازی کن", "راه‌اندازی کن", "راه بنداز", "بازش کن", "open", "launch", "start", "run")
         for (verb in openVerbs) {
             if (q.startsWith(verb + " ")) return q.removePrefix(verb).trim()
@@ -1701,7 +1702,7 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
     }
 
     private fun launchAppByName(name: String) {
-        val target = normalize(name).trim().replace(Regex("\\s+"), " ")
+        val target = normalize(name).trim().replace(Regex("\s+"), " ")
         if (target.isBlank()) { reply("نام برنامه را هم بگو"); return }
         val launcher = Intent(Intent.ACTION_MAIN, null).addCategory(Intent.CATEGORY_LAUNCHER)
         val candidates = packageManager.queryIntentActivities(launcher, 0)
@@ -2218,7 +2219,7 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
                         val localPrompt = agentCore.buildLocalPrompt(prompt, conversation)
                         localAi.generate(localPrompt, 96).trim()
                     }
-                    val cleaned = answer.replace(Regex("<think>[\\s\\S]*?</think>"), "").trim()
+                    val cleaned = answer.replace(Regex("<think>[\s\\S]*?</think>"), "").trim()
                     if (cleaned.isBlank()) throw IllegalStateException("پاسخ دستیار خالی بود.")
                     runOnUiThread {
                         if (isFinishing || requestId != aiRequestGeneration.get()) return@runOnUiThread
@@ -2438,6 +2439,22 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
         }
     }
 
+    private fun tryFallbackTtsEngine(): Boolean {
+        if (ttsFallbackAttempted || selectedTtsEnginePackage == "com.google.android.tts") return false
+        val googleAvailable = try {
+            packageManager.queryIntentServices(Intent(TextToSpeech.Engine.INTENT_ACTION_TTS_SERVICE), 0)
+                .any { it.serviceInfo.packageName == "com.google.android.tts" }
+        } catch (_: Exception) { false }
+        if (!googleAvailable) return false
+        return try {
+            ttsFallbackAttempted = true
+            try { tts.stop(); tts.shutdown() } catch (_: Exception) {}
+            selectedTtsEnginePackage = "com.google.android.tts"
+            tts = TextToSpeech(this, this, "com.google.android.tts")
+            true
+        } catch (_: Exception) { false }
+    }
+
     override fun onInit(code: Int) {
         if (code == TextToSpeech.SUCCESS) {
             try {
@@ -2486,6 +2503,7 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
             // Do not require an explicitly enumerated Persian Voice: some Android TTS engines
             // support fa-IR through setLanguage while exposing an empty voices list.
             ttsReady = result >= TextToSpeech.LANG_AVAILABLE
+            if (!ttsReady && tryFallbackTtsEngine()) return
             if (!ttsReady) {
                 status.text = if (cloudTts.isConfigured()) "صدای فارسی آنلاین آماده استفاده است." else "صدای فارسی نصب نیست؛ در تنظیمات JARVIS صدای آنلاین را فعال کن."
             } else {
@@ -2500,6 +2518,7 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
             }
             if (ttsReady || cloudTts.isConfigured()) pendingSpeech?.let { queued -> pendingSpeech = null; speak(queued) }
         } else {
+            if (tryFallbackTtsEngine()) return
             ttsReady = false
             status.text = if (cloudTts.isConfigured()) "صدای فارسی آنلاین آماده استفاده است." else "موتور تبدیل متن به گفتار گوشی راه‌اندازی نشد؛ صدای فارسی آنلاین را در تنظیمات فعال کن."
             if (cloudTts.isConfigured()) pendingSpeech?.let { queued -> pendingSpeech = null; speak(queued) }
