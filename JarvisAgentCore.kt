@@ -46,7 +46,7 @@ class JarvisAgentCore(context: Context) {
     fun isOnlineConfigured(): Boolean {
         return try {
             normalizedEndpoint()
-            model().isNotBlank() && model().length <= 200
+            apiKey().isNotBlank() && model().isNotBlank() && model().length <= 200
         } catch (_: Exception) {
             false
         }
