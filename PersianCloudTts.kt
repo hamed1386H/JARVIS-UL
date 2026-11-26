@@ -25,8 +25,8 @@ class PersianCloudTts(context: Context) {
         val url = URL("https://api.elevenlabs.io/v1/text-to-speech/$voice?output_format=mp3_44100_128")
         val connection = (url.openConnection() as HttpURLConnection).apply {
             requestMethod = "POST"
-            connectTimeout = 20000
-            readTimeout = 90000
+            connectTimeout = 8000
+            readTimeout = 20000
             doOutput = true
             useCaches = false
             setRequestProperty("xi-api-key", apiKey())
