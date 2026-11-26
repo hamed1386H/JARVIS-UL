@@ -1,0 +1,55 @@
+<!doctype html>
+<html lang="fa" dir="rtl">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#050816">
+  <meta name="description" content="JARVIS — دستیار هوشمند فارسی">
+  <link rel="manifest" href="/manifest.json">
+  <link rel="stylesheet" href="/styles.css">
+  <title>JARVIS | دستیار هوشمند</title>
+</head>
+<body>
+  <div class="ambient ambient-a"></div><div class="ambient ambient-b"></div>
+  <main class="app-shell">
+    <header class="topbar">
+      <div class="brand"><div class="brand-mark"><span></span></div><div><strong>J.A.R.V.I.S</strong><small>JUST A RATHER VERY INTELLIGENT SYSTEM</small></div></div>
+      <div class="top-actions"><span id="connection" class="connection"><i></i> در حال اتصال</span><button id="installBtn" class="icon-btn" aria-label="نصب جارویس" hidden>＋</button><button id="settingsBtn" class="icon-btn" aria-label="تنظیمات">⚙</button></div>
+    </header>
+
+    <section class="hero">
+      <div class="eyebrow"><span></span> PERSONAL AI SYSTEM</div>
+      <h1>در خدمتم.</h1>
+      <p>من جارویس هستم؛ آماده‌ام به تو کمک کنم.</p>
+      <div class="orb-wrap"><div class="orb-ring ring-one"></div><div class="orb-ring ring-two"></div><div class="orb-core"><div class="orb-eye"></div><div class="orb-wave"></div></div><div class="orbit-dot dot-one"></div><div class="orbit-dot dot-two"></div></div>
+      <div id="status" class="status-line">آماده دریافت پیام</div>
+    </section>
+
+    <section class="chat-panel">
+      <div class="chat-heading"><div><span class="live-dot"></span><strong>گفتگوی جارویس</strong></div><button id="clearBtn" class="text-btn">پاک‌کردن گفتگو</button></div>
+      <div id="messages" class="messages" aria-live="polite">
+        <div class="message assistant"><div class="avatar">J</div><div class="bubble"><span class="sender">JARVIS</span><p>سلام! خوش اومدی. می‌تونی تایپ کنی یا با دکمه میکروفون فارسی صحبت کنی.</p></div></div>
+      </div>
+      <form id="composer" class="composer">
+        <button type="button" id="micBtn" class="mic-btn" aria-label="صحبت کردن">⌁</button>
+        <input id="messageInput" autocomplete="off" maxlength="8000" placeholder="پیامت را برای جارویس بنویس..." aria-label="پیام">
+        <button class="send-btn" type="submit" aria-label="ارسال">➤</button>
+      </form>
+      <div class="footnote">مکالمات با مغز مرکزی جارویس همگام می‌شوند.</div>
+    </section>
+    <footer>JARVIS WEB <span>•</span> نسخه آزمایشی</footer>
+  </main>
+
+  <dialog id="loginDialog" class="dialog" open>
+    <form id="loginForm" class="dialog-card">
+      <div class="dialog-symbol">J</div><h2>ورود به جارویس</h2><p>رمز دسترسی سرور را وارد کن.</p>
+      <input id="passwordInput" type="password" autocomplete="current-password" placeholder="رمز دسترسی" required>
+      <button class="primary-btn" type="submit">ورود</button><small id="loginError" class="error"></small>
+    </form>
+  </dialog>
+  <dialog id="settingsDialog" class="dialog">
+    <div class="dialog-card"><button id="closeSettings" class="close-btn">×</button><div class="eyebrow">SYSTEM STATUS</div><h2>وضعیت مغز جارویس</h2><p id="brainStatus">در حال بررسی...</p><div class="setting-row"><span>مدل فعال</span><strong id="modelName">—</strong></div><div class="setting-row"><span>نوع اتصال</span><strong id="providerName">—</strong></div><p class="hint">کلید API روی سرور نگهداری می‌شود و داخل مرورگر یا گوشی ذخیره نمی‌شود.</p><button id="logoutBtn" class="secondary-btn">خروج از حساب</button></div>
+  </dialog>
+  <script src="/app.js" defer></script>
+</body>
+</html>

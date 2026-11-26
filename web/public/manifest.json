@@ -1,0 +1,11 @@
+{
+  "name": "JARVIS — دستیار هوشمند",
+  "short_name": "JARVIS",
+  "description": "دستیار هوشمند فارسی جارویس",
+  "lang": "fa",
+  "dir": "rtl",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#050816",
+  "theme_color": "#050816"
+}
