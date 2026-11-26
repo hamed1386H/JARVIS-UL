@@ -163,7 +163,8 @@ class WakeWordService : Service() {
 
                 waitingForCommandUntil = 0L
                 val actionResult = executeBackgroundPhoneAction(actualCommand)
-                val answer = actionResult ?: answerInBackground(actualCommand)
+                val navigationResult = if (actionResult == null) executeBackgroundNavigation(actualCommand) else null
+                val answer = actionResult ?: navigationResult ?: answerInBackground(actualCommand)
                 showAnswerNotification(answer)
                 speakWithMicPaused(recorder, answer.take(500))
                 updateNotification("گوش‌به‌زنگ فعال است؛ بگو " + configuredWakePhrase())
@@ -217,6 +218,51 @@ class WakeWordService : Service() {
         return normalizeSpeech(raw).ifBlank { "جارویس" }
     }
 
+
+
+    private fun executeBackgroundNavigation(command: String): String? {
+        val q = normalizeSpeech(command).replace(Regex("\\s+"), " ").trim()
+        val weather = q.contains("هواشناسی") || q.contains("آب و هوا") || q.contains("اب و هوا") || q.contains("وضعیت هوا")
+        val searchMatch = Regex("""(?:در\\s+گوگل\\s+)?(?:جستجو کن|جست‌وجو کن|بگرد|سرچ کن)\\s*(?:برای|دنبال)?\\s*(.*)$""").find(q)
+        if (weather || searchMatch != null) {
+            val place = Regex("""(?:در|برای|شهر)\\s+(.+?)(?:\\s+(?:رو|را)?\\s*(?:چک کن|بررسی کن))?$""").find(q)?.groupValues?.get(1)?.trim().orEmpty()
+            val query = if (weather) {
+                if (place.isBlank()) "هواشناسی امروز" else "هواشناسی " + place
+            } else searchMatch?.groupValues?.get(1)?.trim().orEmpty()
+            if (query.isBlank()) return "عبارت جستجو مشخص نیست."
+            return try {
+                val url = "https://www.google.com/search?q=" + java.net.URLEncoder.encode(query, "UTF-8")
+                startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(url)).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
+                "نتایج گوگل برای «" + query + "» باز شد."
+            } catch (_: Exception) { "بازکردن جستجوی گوگل ممکن نشد؛ مرورگر را بررسی کن." }
+        }
+
+        val appTarget = Regex("""^(?:لطفا\\s+)?(.+?)\\s+(?:رو\\s+|را\\s+)?(?:باز\\s*کن|اجرا\\s*کن|راه\\s*بنداز)$""").find(q)?.groupValues?.get(1)?.trim()
+            ?: Regex("""^(?:باز\\s*کن|اجرا\\s*کن)\\s+(.+)$""").find(q)?.groupValues?.get(1)?.trim()
+            ?: return null
+        return try {
+            val installed = packageManager.getInstalledApplications(PackageManager.GET_META_DATA)
+            val target = appTarget.replace(Regex("\\\\s+"), "")
+            val candidates = installed.mapNotNull { info ->
+                val label = packageManager.getApplicationLabel(info).toString()
+                val normalized = normalizeSpeech(label).replace(Regex("\\\\s+"), "")
+                val score = when {
+                    normalized == target -> 100
+                    normalized.startsWith(target) || target.startsWith(normalized) -> 80
+                    normalized.contains(target) || target.contains(normalized) -> 60
+                    else -> 0
+                }
+                if (score > 0) Triple(info.packageName, label, score) else null
+            }.sortedByDescending { it.third }
+            val best = candidates.firstOrNull() ?: return "برنامه «" + appTarget + "» پیدا نشد."
+            if (candidates.size > 1 && candidates[0].third == candidates[1].third)
+                return "چند برنامه با این نام پیدا شد؛ برای انتخاب دقیق، JARVIS را باز کن."
+            val launch = packageManager.getLaunchIntentForPackage(best.first) ?: return "این برنامه قابلیت اجرا از JARVIS را ندارد."
+            launch.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+            startActivity(launch)
+            "برنامه " + best.second + " باز شد."
+        } catch (_: Exception) { "بازکردن برنامه از حالت آماده‌باش ممکن نشد؛ JARVIS را باز کن و دوباره تلاش کن." }
+    }
 
     private fun executeBackgroundPhoneAction(command: String): String? {
         val q = normalizeSpeech(command).replace(Regex("\\s+"), " ").trim()
