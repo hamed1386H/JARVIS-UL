@@ -62,6 +62,8 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
     @Volatile private var voiceSessionActive = false
     private var voiceDialog: AlertDialog? = null
     private var voiceOrb: JarvisOrbView? = null
+    private var chatShellView: View? = null
+    private var chatComposerView: View? = null
     private val executor = Executors.newSingleThreadExecutor()
     // Keep continuous microphone capture/transcription off the AI/model worker queue.
     private val voiceExecutor = Executors.newSingleThreadExecutor()
@@ -190,7 +192,7 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
             orientation = LinearLayout.VERTICAL
             background = glass(Color.argb(225, 10, 8, 25), Color.rgb(90, 56, 160), 22)
             setPadding(dp(13), dp(10), dp(13), dp(10)); visibility = View.GONE
-        }
+        }.also { chatShellView = it }
         val chatHeader = LinearLayout(this).apply { gravity = Gravity.CENTER_VERTICAL }
         chatHeader.addView(TextView(this).apply {
             text = "گفتگوی JARVIS"; textSize = 12f; setTextColor(Color.rgb(203, 194, 235)); typeface = Typeface.DEFAULT_BOLD
@@ -214,7 +216,7 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
             orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL
             background = glass(Color.rgb(10, 8, 24), Color.rgb(108, 66, 185), 24)
             setPadding(dp(8), dp(5), dp(7), dp(5)); visibility = View.GONE
-        }
+        }.also { chatComposerView = it }
         input = EditText(this).apply {
             hint = "پیامت را برای JARVIS بنویس…"; setHintTextColor(Color.rgb(130, 128, 160))
             setTextColor(Color.WHITE); textSize = 14f; setSingleLine(true); setPadding(dp(8), dp(8), dp(8), dp(8))
@@ -722,8 +724,10 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
             voiceDialog?.dismiss()
             voiceDialog = null
             voiceOrb = null
+            chatShellView?.visibility = View.VISIBLE
+            chatComposerView?.visibility = View.VISIBLE
             setJarvisMode(JarvisOrbView.Mode.IDLE)
-            status.text = "مکالمه صوتی بسته شد؛ به گفتگوی متنی برگشتی."
+            status.text = "مکالمه صوتی بسته شد؛ حالت چت فعال است."
             return
         }
         if (ContextCompat.checkSelfPermission(this, Manifest.permission.RECORD_AUDIO) != PackageManager.PERMISSION_GRANTED) {
