@@ -154,21 +154,26 @@ class WakeWordService : Service() {
                     audio[i] = ring[(writeAt + i) % windowSize].toFloat() / 32768f
                 }
                 val heard = normalizeSpeech(engine.transcribe(audio))
-                if (heard.contains("جارویس") || heard.contains("جارويس") || heard.contains("jarvis")) {
+                if (heard.contains("جارویس") || heard.contains("jarvis")) {
                     updateNotification("جارویس بیدار شد؛ فرمانت را بگو")
-                    // Keep the app closed: capture and process the next utterance inside this service.
-                    val commandAudio = captureCommand(recorder, rate, readBuffer)
-                    if (commandAudio == null) {
-                        showAnswerNotification("صدایی دریافت نکردم؛ دوباره بگو جارویس")
+                    // If the user said "Jarvis, ..." in one sentence, use the words already captured.
+                    // Otherwise wait for the next utterance without opening MainActivity.
+                    val sameUtterance = when {
+                        heard.contains("جارویس") -> heard.substringAfter("جارویس").trim()
+                        else -> heard.substringAfter("jarvis").trim()
+                    }
+                    val command = if (sameUtterance.length >= 2) {
+                        sameUtterance
                     } else {
-                        val command = normalizeSpeech(engine.transcribe(commandAudio))
-                        if (command.isBlank()) {
-                            showAnswerNotification("صدایت را واضح نشنیدم؛ دوباره تلاش کن")
-                        } else {
-                            showAnswerNotification("درخواست: " + command + "\nدر حال آماده‌سازی پاسخ…", "در حال پردازش")
-                            val answer = answerInBackground(command)
-                            showAnswerNotification(answer)
-                        }
+                        val commandAudio = captureCommand(recorder, rate, readBuffer)
+                        if (commandAudio == null) "" else normalizeSpeech(engine.transcribe(commandAudio))
+                    }
+                    if (command.isBlank()) {
+                        showAnswerNotification("صدایی دریافت نکردم یا صدایت واضح نبود؛ دوباره بگو جارویس")
+                    } else {
+                        showAnswerNotification("درخواست: " + command + "\nدر حال آماده‌سازی پاسخ…", "در حال پردازش")
+                        val answer = answerInBackground(command)
+                        showAnswerNotification(answer)
                     }
                     ring.fill(0)
                     writeAt = 0
