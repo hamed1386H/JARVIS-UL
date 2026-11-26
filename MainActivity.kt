@@ -1083,8 +1083,13 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
                             if (!voiceSessionActive) addLog("شما", words)
                             handleCommand(words)
                         } else {
-                            status.text = "گفتار واضحی تشخیص داده نشد؛ دوباره امتحان کن."
+                            status.text = "گفتار واضحی تشخیص داده نشد؛ دوباره صحبت کن."
                             setJarvisMode(JarvisOrbView.Mode.IDLE)
+                            if (voiceSessionActive && activityVisible && !isFinishing) {
+                                android.os.Handler(mainLooper).postDelayed({
+                                    if (voiceSessionActive && activityVisible && !isFinishing && !isJarvisSpeaking()) beginListening()
+                                }, 600)
+                            }
                         }
                     }
                 } catch (e: Exception) {
@@ -1601,14 +1606,16 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
 
     private fun executeContactAction(number: String, body: String, action: String, name: String) {
         val permission = if (action == "call") Manifest.permission.CALL_PHONE else Manifest.permission.SEND_SMS
-        pendingSmsRecipient = name; pendingSmsNumber = number; pendingSmsBody = body; pendingContactAction = action
+        val dialNumber = android.telephony.PhoneNumberUtils.stripSeparators(number)
+        if (dialNumber.isBlank()) { reply("شماره مخاطب معتبر نیست؛ پیام ارسال نشد."); return }
+        pendingSmsRecipient = name; pendingSmsNumber = dialNumber; pendingSmsBody = body; pendingContactAction = action
         if (ContextCompat.checkSelfPermission(this, permission) != PackageManager.PERMISSION_GRANTED) {
             ActivityCompat.requestPermissions(this, arrayOf(permission), requestContactAction)
             reply(if (action == "call") "برای تماس مستقیم، مجوز تماس را تأیید کن." else "برای ارسال خودکار پیامک، اجازه ارسال پیامک را یک‌بار فعال کن.")
             return
         }
         try {
-            if (action == "call") { startActivity(Intent(Intent.ACTION_CALL, Uri.parse("tel:" + Uri.encode(number)))); showResultNotification("در حال تماس با $name") }
+            if (action == "call") { startActivity(Intent(Intent.ACTION_CALL, Uri.parse("tel:" + Uri.encode(dialNumber)))); showResultNotification("در حال تماس با $name") }
             else {
                 val manager = getSystemService(android.telephony.SmsManager::class.java)
                     ?: android.telephony.SmsManager.getDefault()
@@ -1628,14 +1635,14 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
                     ))
                 }
                 if (parts.size <= 1) {
-                    manager.sendTextMessage(number, null, body, callbacks.first(), null)
+                    manager.sendTextMessage(dialNumber, null, body, callbacks.first(), null)
                 } else {
-                    manager.sendMultipartTextMessage(number, null, parts, callbacks, null)
+                    manager.sendMultipartTextMessage(dialNumber, null, parts, callbacks, null)
                 }
                 reply("درخواست ارسال پیامک به $name ثبت شد؛ نتیجه واقعی ارسال را در اعلان جارویس می‌بینی.")
             }
         } catch (e: Exception) {
-            if (action == "sms") openSmsComposer(number, body, name)
+            if (action == "sms") openSmsComposer(dialNumber, body, name)
             else showResultNotification("انجام عملیات برای $name ناموفق بود: ${e.message ?: "خطای سیستم"}")
         }
     }
