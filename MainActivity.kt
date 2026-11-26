@@ -78,8 +78,21 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
     private val requestWhisperModel = 106
     private val requestDownloadFolder = 108
     private val requestSmsContacts = 109
+    private val requestContactAction = 110
     private var pendingSmsRecipient = ""
     private var pendingSmsBody = ""
+    private var pendingContactAction = "sms"
+    private var smsReceiverRegistered = false
+    private val smsSentAction = "com.chtai.assistant.SMS_SENT"
+    private val smsSentReceiver = object : BroadcastReceiver() {
+        override fun onReceive(context: Context?, intent: Intent?) {
+            if (intent?.action != smsSentAction) return
+            val recipient = intent.getStringExtra("recipient") ?: "مخاطب"
+            val sent = resultCode == Activity.RESULT_OK
+            showResultNotification(if (sent) "پیامک به $recipient ارسال شد" else "ارسال پیامک به $recipient ناموفق بود")
+            if (smsReceiverRegistered) { try { unregisterReceiver(this) } catch (_: Exception) { }; smsReceiverRegistered = false }
+        }
+    }
     private val PREF_DOWNLOAD_TREE = "jarvis_download_tree_uri"
     private val whisperModelFile by lazy { java.io.File(getExternalFilesDir(Environment.DIRECTORY_DOWNLOADS) ?: filesDir, WHISPER_MODEL_FILENAME) }
     @Volatile private var activityVisible = false
@@ -1247,8 +1260,10 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
         }
         val googleQuery = extractGoogleSearchQuery(raw)
         if (!googleQuery.isNullOrBlank()) { openGoogleSearch(googleQuery); return }
+        val callRecipient = parseCallRequest(raw)
+        if (!callRecipient.isNullOrBlank()) { beginContactAction(callRecipient, "", "call"); return }
         val smsRequest = parseSmsRequest(raw)
-        if (smsRequest != null) { beginSmsFlow(smsRequest.first, smsRequest.second); return }
+        if (smsRequest != null) { beginContactAction(smsRequest.first, smsRequest.second, "sms"); return }
         if (q.contains("پیام بده") || q.contains("پیامک بده") || q.contains("اس ام اس بده")) {
             reply("برای پیام‌دادن بگو: به نام مخاطب پیام بده، بنویس متن پیام"); return
         }
@@ -1296,81 +1311,77 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
         return Pair(recipient, body)
     }
 
-    private fun beginSmsFlow(recipient: String, body: String) {
-        if (recipient.isBlank() || body.isBlank()) return
-        pendingSmsRecipient = recipient
-        pendingSmsBody = body
+    private fun parseCallRequest(raw: String): String? {
+        val q = normalize(raw).replace(Regex("\\s+"), " ").trim()
+        val patterns = listOf(Regex("""^(?:لطفا\\s+)?به\\s+(.+?)\\s+(?:زنگ\\s+بزن|تماس\\s+بگیر|تلفن\\s+کن)$"""), Regex("""^(?:لطفا\\s+)?با\\s+(.+?)\\s+(?:تماس\\s+بگیر|زنگ\\s+بزن)$"""))
+        return patterns.firstNotNullOfOrNull { it.find(q)?.groupValues?.get(1)?.trim() }
+    }
+
+    private fun beginContactAction(recipient: String, body: String, action: String) {
+        if (recipient.isBlank() || (action == "sms" && body.isBlank())) { reply("نام مخاطب و متن پیام را کامل بگو؛ مثال: به علی پیام بده، بنویس سلام"); return }
+        pendingSmsRecipient = recipient; pendingSmsBody = body; pendingContactAction = action
         if (ContextCompat.checkSelfPermission(this, Manifest.permission.READ_CONTACTS) != PackageManager.PERMISSION_GRANTED) {
             ActivityCompat.requestPermissions(this, arrayOf(Manifest.permission.READ_CONTACTS), requestSmsContacts)
-            reply("برای پیدا کردن مخاطب، اجازه دسترسی به مخاطبین را تأیید کن.")
-            return
+            reply("برای پیدا کردن مخاطب، اجازه دسترسی به مخاطبین را بده."); return
         }
-        openSmsForContact(recipient, body)
+        openContactForAction(recipient, body, action)
     }
 
-    private fun openSmsForContact(recipient: String, body: String) {
-        data class ContactMatch(val name: String, val number: String, val score: Int)
-        val matches = mutableListOf<ContactMatch>()
+    private fun openContactForAction(recipient: String, body: String, action: String) {
+        data class Match(val name: String, val number: String, val score: Int)
+        val matches = mutableListOf<Match>()
         try {
-            val projection = arrayOf(
-                ContactsContract.CommonDataKinds.Phone.DISPLAY_NAME,
-                ContactsContract.CommonDataKinds.Phone.NUMBER
-            )
-            contentResolver.query(ContactsContract.CommonDataKinds.Phone.CONTENT_URI, projection, null, null,
-                ContactsContract.CommonDataKinds.Phone.DISPLAY_NAME + " ASC")?.use { cursor ->
-                val nameCol = cursor.getColumnIndexOrThrow(ContactsContract.CommonDataKinds.Phone.DISPLAY_NAME)
-                val numberCol = cursor.getColumnIndexOrThrow(ContactsContract.CommonDataKinds.Phone.NUMBER)
-                while (cursor.moveToNext()) {
-                    val name = cursor.getString(nameCol).orEmpty()
-                    val number = cursor.getString(numberCol).orEmpty()
-                    val normalizedName = normalize(name).replace(Regex("\\s+"), "")
-                    val target = normalize(recipient).replace(Regex("\\s+"), "")
-                    val score = when {
-                        normalizedName == target -> 100
-                        normalizedName.startsWith(target) || target.startsWith(normalizedName) -> 80
-                        normalizedName.contains(target) || target.contains(normalizedName) -> 60
-                        else -> 0
-                    }
-                    if (score > 0 && number.isNotBlank()) matches.add(ContactMatch(name, number, score))
+            val cols = arrayOf(ContactsContract.CommonDataKinds.Phone.DISPLAY_NAME, ContactsContract.CommonDataKinds.Phone.NUMBER)
+            contentResolver.query(ContactsContract.CommonDataKinds.Phone.CONTENT_URI, cols, null, null, ContactsContract.CommonDataKinds.Phone.DISPLAY_NAME + " ASC")?.use { cur ->
+                val ni = cur.getColumnIndexOrThrow(ContactsContract.CommonDataKinds.Phone.DISPLAY_NAME); val pi = cur.getColumnIndexOrThrow(ContactsContract.CommonDataKinds.Phone.NUMBER)
+                while (cur.moveToNext()) {
+                    val name = cur.getString(ni).orEmpty(); val number = cur.getString(pi).orEmpty()
+                    val n = normalize(name).replace(Regex("\\s+"), ""); val t = normalize(recipient).replace(Regex("\\s+"), "")
+                    val score = when { n == t -> 100; n.startsWith(t) || t.startsWith(n) -> 80; n.contains(t) || t.contains(n) -> 60; else -> 0 }
+                    if (score > 0 && number.isNotBlank()) matches.add(Match(name, number, score))
                 }
             }
-        } catch (e: Exception) {
-            reply("خواندن مخاطبین ممکن نشد: " + (e.message ?: "خطای دسترسی"))
-            return
-        }
+        } catch (e: Exception) { reply("خواندن مخاطبین ممکن نشد: ${e.message ?: "خطای دسترسی"}"); return }
         val best = matches.sortedByDescending { it.score }.distinctBy { it.number }
-        if (best.isEmpty()) {
-            reply("مخاطبی با نام «" + recipient + "» پیدا نکردم. نام ذخیره‌شده را بررسی کن.")
-            return
+        if (best.isEmpty()) { reply("مخاطبی با نام «$recipient» پیدا نکردم."); return }
+        if (best.size > 1 && best[0].score <= best[1].score) {
+            AlertDialog.Builder(this).setTitle("کدام مخاطب؟").setItems(best.take(8).map { it.name + " • " + it.number }.toTypedArray()) { _, which -> executeContactAction(best[which].number, body, action, best[which].name) }.setNegativeButton("لغو", null).show(); return
         }
-        val secondScore = best.getOrNull(1)?.score ?: 0
-        if (best.size > 1 && best[0].score <= secondScore) {
-            val labels = best.take(8).map { it.name + "  •  " + it.number }.toTypedArray()
-            AlertDialog.Builder(this).setTitle("کدام مخاطب؟")
-                .setItems(labels) { _, which -> launchSmsComposer(best[which].number, body, best[which].name) }
-                .setNegativeButton("لغو", null).show()
-            return
-        }
-        val chosen = best.first()
-        launchSmsComposer(chosen.number, body, chosen.name)
+        executeContactAction(best[0].number, body, action, best[0].name)
     }
 
-    private fun launchSmsComposer(number: String, body: String, contactName: String) {
+    private fun executeContactAction(number: String, body: String, action: String, name: String) {
+        val permission = if (action == "call") Manifest.permission.CALL_PHONE else Manifest.permission.SEND_SMS
+        if (ContextCompat.checkSelfPermission(this, permission) != PackageManager.PERMISSION_GRANTED) {
+            pendingSmsRecipient = name; pendingSmsBody = body; pendingContactAction = action
+            ActivityCompat.requestPermissions(this, arrayOf(permission), requestContactAction)
+            reply(if (action == "call") "برای تماس مستقیم، مجوز تماس را تأیید کن." else "برای ارسال خودکار پیامک، مجوز ارسال پیامک را تأیید کن."); return
+        }
         try {
-            val intent = Intent(Intent.ACTION_SENDTO, Uri.parse("smsto:" + Uri.encode(number))).apply {
-                putExtra("sms_body", body)
+            if (action == "call") { startActivity(Intent(Intent.ACTION_CALL, Uri.parse("tel:" + Uri.encode(number)))); showResultNotification("در حال تماس با $name") }
+            else {
+                if (!smsReceiverRegistered) { ContextCompat.registerReceiver(this, smsSentReceiver, IntentFilter(smsSentAction), ContextCompat.RECEIVER_NOT_EXPORTED); smsReceiverRegistered = true }
+                val callbackIntent = Intent(smsSentAction).setPackage(packageName).putExtra("recipient", name)
+                val callback = android.app.PendingIntent.getBroadcast(this, System.currentTimeMillis().toInt(), callbackIntent, android.app.PendingIntent.FLAG_UPDATE_CURRENT or android.app.PendingIntent.FLAG_MUTABLE)
+                val manager = if (android.os.Build.VERSION.SDK_INT >= 31) getSystemService(android.telephony.SmsManager::class.java) else @Suppress("DEPRECATION") android.telephony.SmsManager.getDefault()
+                val parts = manager.divideMessage(body)
+                if (parts.size <= 1) manager.sendTextMessage(number, null, body, callback, null) else manager.sendMultipartTextMessage(number, null, parts, ArrayList(java.util.Collections.nCopies(parts.size, callback)), null)
+                reply("پیامک به $name در حال ارسال است.")
             }
-            if (intent.resolveActivity(packageManager) == null) {
-                reply("برنامه پیامک پیش‌فرض روی گوشی پیدا نشد.")
-                return
-            }
-            startActivity(intent)
-            reply("پیام برای " + contactName + " آماده شد. متن را بررسی کن و دکمه ارسال را خودت بزن.")
-        } catch (e: Exception) {
-            reply("بازکردن صفحه پیامک ممکن نشد: " + (e.message ?: "خطا"))
-        }
+        } catch (e: Exception) { showResultNotification("انجام عملیات برای $name ناموفق بود: ${e.message ?: "خطای سیستم"}") }
     }
 
+    private fun showResultNotification(message: String) {
+        try {
+            val nm = getSystemService(NOTIFICATION_SERVICE) as android.app.NotificationManager; val id = "jarvis_action_results"
+            if (android.os.Build.VERSION.SDK_INT >= 26 && nm.getNotificationChannel(id) == null) nm.createNotificationChannel(android.app.NotificationChannel(id, "گزارش عملیات JARVIS", android.app.NotificationManager.IMPORTANCE_HIGH))
+            val open = Intent(this, MainActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_SINGLE_TOP or Intent.FLAG_ACTIVITY_CLEAR_TOP)
+            val pi = android.app.PendingIntent.getActivity(this, 701, open, android.app.PendingIntent.FLAG_UPDATE_CURRENT or android.app.PendingIntent.FLAG_IMMUTABLE)
+            val b = if (android.os.Build.VERSION.SDK_INT >= 26) android.app.Notification.Builder(this, id) else android.app.Notification.Builder(this)
+            val n = b.setSmallIcon(android.R.drawable.sym_action_email).setContentTitle("گزارش جارویس").setContentText(message).setStyle(android.app.Notification.BigTextStyle().bigText(message)).setContentIntent(pi).setAutoCancel(true).setCategory(android.app.Notification.CATEGORY_MESSAGE).setPriority(android.app.Notification.PRIORITY_HIGH).build()
+            if (android.os.Build.VERSION.SDK_INT < 33 || ContextCompat.checkSelfPermission(this, Manifest.permission.POST_NOTIFICATIONS) == PackageManager.PERMISSION_GRANTED) nm.notify(702, n)
+        } catch (_: Exception) { }
+    }
     private fun extractAppLaunchTarget(command: String): String? {
         var q = command.trim()
             .replace(Regex("^(لطفا|لطفاً|خواهشا|خواهشاً|جارویس|jarvis)[،, ]+"), "")
@@ -2064,8 +2075,13 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
             else reply("مجوز اعلان داده نشد؛ برای نمایش اعلان دائمی باید آن را از تنظیمات مجاز کنی")
         }
         if (requestCode == requestSmsContacts) {
-            if (grantResults.firstOrNull() == PackageManager.PERMISSION_GRANTED) openSmsForContact(pendingSmsRecipient, pendingSmsBody)
+            if (grantResults.firstOrNull() == PackageManager.PERMISSION_GRANTED) openContactForAction(pendingSmsRecipient, pendingSmsBody, pendingContactAction)
             else reply("بدون اجازه مخاطبین نمی‌توانم نام مخاطب را پیدا کنم.")
+            return
+        }
+        if (requestCode == requestContactAction) {
+            if (grantResults.firstOrNull() == PackageManager.PERMISSION_GRANTED) openContactForAction(pendingSmsRecipient, pendingSmsBody, pendingContactAction)
+            else reply("مجوز لازم داده نشد؛ عملیات انجام نشد.")
             return
         }
         if (requestCode == requestCorePermissions) {
