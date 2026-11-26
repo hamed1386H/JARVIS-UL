@@ -65,6 +65,14 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
     private var chatShellView: View? = null
     private var chatComposerView: View? = null
     private val executor = Executors.newSingleThreadExecutor()
+    // Dedicated queue: native model loading must never block online replies.
+    private val aiExecutor = Executors.newSingleThreadExecutor()
+    private val aiRequestActive = java.util.concurrent.atomic.AtomicBoolean(false)
+    private val aiRequestGeneration = java.util.concurrent.atomic.AtomicLong(0L)
+    @Volatile private var localModelLoading = false
+    private val speechWatchdog = android.os.Handler(android.os.Looper.getMainLooper())
+    private var speechWatchdogTask: Runnable? = null
+    private var wakeWasRunningBeforeVoiceSession = false
     // Keep continuous microphone capture/transcription off the AI/model worker queue.
     private val voiceExecutor = Executors.newSingleThreadExecutor()
     private val prefs by lazy { getSharedPreferences("cht_ai", Context.MODE_PRIVATE) }
@@ -85,6 +93,7 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
     private val requestSmsContacts = 109
     private val requestContactAction = 110
     private var pendingSmsRecipient = ""
+    private var pendingSmsNumber = ""
     private var pendingSmsBody = ""
     private var pendingContactAction = "sms"
     private val PREF_DOWNLOAD_TREE = "jarvis_download_tree_uri"
@@ -760,9 +769,11 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
         }
         wakeMode = prefs.getBoolean("wake_mode_enabled", false)
         handleWakeIntent(intent)
-        if (wakeMode && !wakePromptPending && !isWakeServiceRunning()) startWakeServiceNow()
-        if (voiceSessionActive && !androidRecognitionActive && !voiceCaptureActive.get()) {
-            android.os.Handler(mainLooper).postDelayed({ if (voiceSessionActive && activityVisible) beginListening() }, 500)
+        if (wakeMode && !voiceSessionActive && !wakePromptPending && !isWakeServiceRunning()) startWakeServiceNow()
+        if (voiceSessionActive && !androidRecognitionActive && !voiceCaptureActive.get() && !isJarvisSpeaking()) {
+            android.os.Handler(mainLooper).postDelayed({
+                if (voiceSessionActive && activityVisible && !isJarvisSpeaking()) beginListening()
+            }, 700)
         }
     }
 
@@ -800,6 +811,10 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
             voiceSessionActive = false
             androidRecognitionActive = false
             destroySpeechRecognizer()
+            if (wakeWasRunningBeforeVoiceSession && prefs.getBoolean("wake_mode_enabled", true)) {
+                wakeWasRunningBeforeVoiceSession = false
+                startWakeServiceNow()
+            }
             try { tts.stop() } catch (_: Exception) {}
             try { cloudPlayer?.stop(); cloudPlayer?.release() } catch (_: Exception) {}
             cloudPlayer = null
@@ -816,6 +831,8 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
             ActivityCompat.requestPermissions(this, arrayOf(Manifest.permission.RECORD_AUDIO), requestMic)
             return
         }
+        wakeWasRunningBeforeVoiceSession = isWakeServiceRunning()
+        if (wakeWasRunningBeforeVoiceSession) stopService(Intent(this, WakeWordService::class.java))
         voiceSessionActive = true
         val panel = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
@@ -1527,13 +1544,16 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
     // SMS is deliberately handed to the system messaging app; JARVIS never sends silently.
     private fun parseSmsRequest(raw: String): Pair<String, String>? {
         val q = normalize(raw).replace(Regex("[،,؛;]+"), " ").replace(Regex("\\s+"), " ").trim()
-        val recipientMatch = Regex("""به\s+(.+?)\s+(?:پیام\s*بده|پیامک\s*بده|اس\s*ام\s*اس\s*بده)""").find(q)
-            ?: return null
+        val recipientPatterns = listOf(
+            Regex("""به\\s+(.+?)\\s+(?:پیام\\s*بده|پیامک\\s*بده|اس\\s*ام\\s*اس\\s*بده)"""),
+            Regex("""(?:پیام|پیامک)\\s+به\\s+(.+?)\\s+(?:بده|ارسال\\s+کن)""")
+        )
+        val recipientMatch = recipientPatterns.firstNotNullOfOrNull { it.find(q) } ?: return null
         val recipient = recipientMatch.groupValues[1].trim().trim(',', '،', '.', '!')
-        val bodyMatch = Regex("""(?:بنویس|متن(?:ش)?(?:\s+این)?(?:\s+باشه)?|بگو)\s*[:：،,-]*\s*(.+)$""").find(q)
-        val body = bodyMatch?.groupValues?.get(1)?.trim().orEmpty()
+        val bodyMatch = Regex("""(?:و\\s*)?(?:بنویس|متن(?:ش)?(?:\\s+این)?(?:\\s+باشه)?|بگو|بفرست)\\s*[:：،,-]*\\s*(.+)$""").find(q)
+        val body = bodyMatch?.groupValues?.get(1)?.trim()?.removePrefix("مثلا ")?.removePrefix("مثلاً ").orEmpty()
         if (recipient.isBlank() || body.isBlank()) {
-            reply("نام مخاطب یا متن پیام کامل نیست. مثال: به کوثر پیام بده، بنویس سلام")
+            reply("نام مخاطب یا متن پیام کامل نیست. مثال: به علی پیام بده، بگو کجایی؟")
             return Pair("", "")
         }
         return Pair(recipient, body)
@@ -1580,16 +1600,17 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
 
     private fun executeContactAction(number: String, body: String, action: String, name: String) {
         val permission = if (action == "call") Manifest.permission.CALL_PHONE else Manifest.permission.SEND_SMS
+        pendingSmsRecipient = name; pendingSmsNumber = number; pendingSmsBody = body; pendingContactAction = action
         if (ContextCompat.checkSelfPermission(this, permission) != PackageManager.PERMISSION_GRANTED) {
-            pendingSmsRecipient = name; pendingSmsBody = body; pendingContactAction = action
             ActivityCompat.requestPermissions(this, arrayOf(permission), requestContactAction)
-            reply(if (action == "call") "برای تماس مستقیم، مجوز تماس را تأیید کن." else "برای ارسال خودکار پیامک، مجوز ارسال پیامک را تأیید کن."); return
+            reply(if (action == "call") "برای تماس مستقیم، مجوز تماس را تأیید کن." else "برای ارسال خودکار پیامک، اجازه ارسال پیامک را یک‌بار فعال کن.")
+            return
         }
         try {
             if (action == "call") { startActivity(Intent(Intent.ACTION_CALL, Uri.parse("tel:" + Uri.encode(number)))); showResultNotification("در حال تماس با $name") }
             else {
                 val manager = getSystemService(android.telephony.SmsManager::class.java)
-                    ?: throw IllegalStateException("سرویس پیامک در دسترس نیست")
+                    ?: android.telephony.SmsManager.getDefault()
                 val parts = manager.divideMessage(body)
                 val batchId = System.currentTimeMillis()
                 val callbacks = ArrayList<android.app.PendingIntent>()
@@ -1610,9 +1631,24 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
                 } else {
                     manager.sendMultipartTextMessage(number, null, parts, callbacks, null)
                 }
-                reply("پیامک به $name در پس‌زمینه در حال ارسال است.")
+                reply("درخواست ارسال پیامک به $name ثبت شد؛ نتیجه واقعی ارسال را در اعلان جارویس می‌بینی.")
             }
-        } catch (e: Exception) { showResultNotification("انجام عملیات برای $name ناموفق بود: ${e.message ?: "خطای سیستم"}") }
+        } catch (e: Exception) {
+            if (action == "sms") openSmsComposer(number, body, name)
+            else showResultNotification("انجام عملیات برای $name ناموفق بود: ${e.message ?: "خطای سیستم"}")
+        }
+    }
+
+    private fun openSmsComposer(number: String, body: String, name: String) {
+        try {
+            val intent = Intent(Intent.ACTION_SENDTO, Uri.parse("smsto:" + Uri.encode(number))).apply {
+                putExtra("sms_body", body)
+            }
+            startActivity(intent)
+            showResultNotification("ارسال خودکار پیامک مجاز نشد؛ پنجره پیام برای $name باز شد تا ارسال را تأیید کنی.")
+        } catch (e: Exception) {
+            showResultNotification("ارسال پیامک برای $name ممکن نشد: ${e.message ?: "برنامه پیامک در دسترس نیست"}")
+        }
     }
 
     private fun showResultNotification(message: String) {
@@ -1971,16 +2007,28 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
     }
 
     private fun loadLocalModel(file: java.io.File) {
+        if (localModelLoading || localAi.isLoaded()) return
+        localModelLoading = true
         status.text = "در حال بارگذاری مدل محلی روی گوشی…"
-        executor.execute {
-            try {
-                require(file.length() <= 1_800_000_000L) { "این مدل برای حافظه گوشی سنگین است؛ مدل Qwen3-1.7B را انتخاب کن." }
-                localAi.load(file.absolutePath, 2, 1024)
-                prefs.edit().putString("local_model_path", file.absolutePath).putBoolean("local_ai_enabled", true).apply()
-                runOnUiThread { status.text = "مغز هوشمند JARVIS فعال است؛ پردازش کاملاً محلی"; addLog("JARVIS", "مدل Qwen روی گوشی بارگذاری و آماده شد.") }
-            } catch (e: Exception) {
-                runOnUiThread { reply("بارگذاری مدل ناموفق بود: ${e.message ?: "حافظه کافی نیست یا فایل سازگار نیست."}") }
+        try {
+            executor.execute {
+                try {
+                    require(file.length() <= 1_800_000_000L) { "این مدل برای حافظه گوشی سنگین است؛ مدل Qwen3-1.7B را انتخاب کن." }
+                    localAi.load(file.absolutePath, 2, 1024)
+                    prefs.edit().putString("local_model_path", file.absolutePath).putBoolean("local_ai_enabled", true).apply()
+                    runOnUiThread {
+                        if (!isFinishing) {
+                            status.text = "مغز هوشمند JARVIS فعال است؛ پردازش کاملاً محلی"
+                            addLog("JARVIS", "مدل Qwen روی گوشی بارگذاری و آماده شد.")
+                        }
+                    }
+                } catch (e: Exception) {
+                    runOnUiThread { if (!isFinishing) reply("بارگذاری مدل ناموفق بود: ${e.message ?: "حافظه کافی نیست یا فایل سازگار نیست."}") }
+                } finally { localModelLoading = false }
             }
+        } catch (_: java.util.concurrent.RejectedExecutionException) {
+            localModelLoading = false
+            status.text = "صف پردازش مدل در دسترس نیست؛ برنامه را دوباره باز کن."
         }
     }
 
@@ -2129,65 +2177,82 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
         val onlineConfigured = agentCore.isOnlineConfigured() && prefs.getBoolean("online_ai_enabled", true)
         val localEnabled = prefs.getBoolean("local_ai_enabled", true)
         if (!onlineConfigured && (!localEnabled || !localAi.isLoaded())) {
-            reply("برای گفت‌وگو باید اتصال هوش آنلاین را در تنظیمات وارد کنی یا مدل محلی را دانلود و فعال کنی.")
+            val message = if (localModelLoading) "مدل محلی هنوز در حال بارگذاری است؛ برای جلوگیری از انتظار طولانی، درخواست را در صف نگه نداشتم. چند لحظه دیگر دوباره بگو."
+                else "برای پاسخ سریع، اتصال هوش آنلاین را تنظیم کن یا صبر کن مدل محلی کامل بارگذاری شود."
+            reply(message)
             return
         }
-        status.text = if (onlineConfigured) "در حال اتصال امن به دستیار آنلاین…" else "در حال فکر کردن روی گوشی…"
+        if (!aiRequestActive.compareAndSet(false, true)) {
+            reply("در حال پاسخ‌گویی به درخواست قبلی هستم؛ درخواست جدید را در صف طولانی نمی‌گذارم. کمی بعد دوباره بگو.")
+            return
+        }
+        val requestId = aiRequestGeneration.incrementAndGet()
+        val historyText = buildString {
+            val first = (conversation.length() - 8).coerceAtLeast(0)
+            for (i in first until conversation.length()) {
+                val item = conversation.optJSONObject(i) ?: continue
+                val role = item.optString("role", "user")
+                val content = item.optString("content", "").takeLast(700)
+                append(if (role == "assistant") "JARVIS: " else "کاربر: ")
+                append(content).append("\\n")
+            }
+        }
+        status.text = if (onlineConfigured) "در حال دریافت پاسخ آنلاین…" else "در حال پردازش روی گوشی…"
         setJarvisMode(JarvisOrbView.Mode.THINKING)
-        executor.execute {
-            try {
-                val historyText = buildString {
-                    val first = (conversation.length() - 8).coerceAtLeast(0)
-                    for (i in first until conversation.length()) {
-                        val item = conversation.optJSONObject(i) ?: continue
-                        val role = item.optString("role", "user")
-                        val content = item.optString("content", "").takeLast(900)
-                        append(if (role == "assistant") "JARVIS: " else "کاربر: ")
-                        append(content).append("\\n")
-                    }
-                }
-                val answer = if (onlineConfigured) {
-                    try {
-                        agentCore.askOnline(
-                            "تاریخچه کوتاه گفتگو:\\n$historyText\\nپیام جدید کاربر:\\n${prompt.take(4000)}"
-                        ).trim()
-                    } catch (onlineError: Exception) {
-                        if (!localEnabled || !localAi.isLoaded()) throw onlineError
-                        runOnUiThread { status.text = "اتصال آنلاین ناموفق؛ تلاش با مدل محلی…" }
-                        val localPrompt = agentCore.buildLocalPrompt(prompt, conversation)
-                        localAi.generate(localPrompt, 220).trim()
-                    }
-                } else {
-                    val localPrompt = agentCore.buildLocalPrompt(prompt, conversation)
-                    localAi.generate(localPrompt, 220).trim()
-                }
-                val cleaned = answer.replace(Regex("<think>[\\s\\S]*?</think>"), "").trim()
-                if (cleaned.isBlank()) throw IllegalStateException("پاسخ دستیار خالی بود.")
-                runOnUiThread {
-                    val action = parseAiAction(cleaned)
-                    if (action != null) {
-                        val command = action.optString("command", "").trim()
-                        if (isAllowedAiCommand(command)) {
-                            val message = "برای اجرای این فرمان تأیید تو لازم است: $command"
-                            addLog("JARVIS", message)
-                            addConversationMessage("assistant", message)
-                            confirmAiAction(command)
-                        } else {
-                            val message = "این فرمان در فهرست عملیات امن و پشتیبانی‌شده نیست؛ اجرا نشد."
-                            addLog("JARVIS", message)
-                            addConversationMessage("assistant", message)
-                            speak(message)
+        try {
+            aiExecutor.execute {
+                try {
+                    val answer = if (onlineConfigured) {
+                        try {
+                            agentCore.askOnline(
+                                "تاریخچه کوتاه گفتگو:\\n$historyText\\nپیام جدید کاربر:\\n${prompt.take(2500)}",
+                                maxTokens = if (voiceSessionActive) 128 else 160
+                            ).trim()
+                        } catch (onlineError: Exception) {
+                            if (!localEnabled || !localAi.isLoaded() || voiceSessionActive) throw onlineError
+                            runOnUiThread { if (!isFinishing && requestId == aiRequestGeneration.get()) status.text = "پاسخ آنلاین نرسید؛ تلاش کوتاه با مدل محلی…" }
+                            val localPrompt = agentCore.buildLocalPrompt(prompt, conversation)
+                            localAi.generate(localPrompt, 96).trim()
                         }
                     } else {
-                        addLog("JARVIS", cleaned)
-                        addConversationMessage("assistant", cleaned)
-                        status.text = if (onlineConfigured) "پاسخ دستیار آنلاین آماده شد" else "پاسخ محلی آماده شد"
-                        speak(cleaned)
+                        val localPrompt = agentCore.buildLocalPrompt(prompt, conversation)
+                        localAi.generate(localPrompt, 96).trim()
                     }
-                }
-            } catch (e: Exception) {
-                runOnUiThread { reply("پاسخ‌گویی ناموفق بود: ${e.message ?: "خطای ناشناخته"}") }
+                    val cleaned = answer.replace(Regex("<think>[\\s\\S]*?</think>"), "").trim()
+                    if (cleaned.isBlank()) throw IllegalStateException("پاسخ دستیار خالی بود.")
+                    runOnUiThread {
+                        if (isFinishing || requestId != aiRequestGeneration.get()) return@runOnUiThread
+                        val action = parseAiAction(cleaned)
+                        if (action != null) {
+                            val command = action.optString("command", "").trim()
+                            if (isAllowedAiCommand(command)) {
+                                val message = "برای اجرای این فرمان تأیید تو لازم است: $command"
+                                addLog("JARVIS", message)
+                                addConversationMessage("assistant", message)
+                                confirmAiAction(command)
+                            } else {
+                                val message = "این فرمان در فهرست عملیات امن و پشتیبانی‌شده نیست؛ اجرا نشد."
+                                addLog("JARVIS", message)
+                                addConversationMessage("assistant", message)
+                                speak(message)
+                            }
+                        } else {
+                            addLog("JARVIS", cleaned)
+                            addConversationMessage("assistant", cleaned)
+                            status.text = if (onlineConfigured) "پاسخ آنلاین آماده شد" else "پاسخ محلی آماده شد"
+                            speak(cleaned)
+                        }
+                    }
+                } catch (e: Exception) {
+                    runOnUiThread {
+                        if (!isFinishing && requestId == aiRequestGeneration.get())
+                            reply("پاسخ‌گویی ناموفق بود: ${e.message ?: "خطای شبکه یا مدل"}")
+                    }
+                } finally { aiRequestActive.set(false) }
             }
+        } catch (_: java.util.concurrent.RejectedExecutionException) {
+            aiRequestActive.set(false)
+            reply("پردازشگر پاسخ‌گویی بسته شده؛ برنامه را دوباره باز کن.")
         }
     }
 
@@ -2227,6 +2292,21 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
     }
 
     private fun reply(message: String) { status.text = message; addLog("JARVIS", message); speak(message) }
+    private fun isJarvisSpeaking(): Boolean {
+        return try { (::tts.isInitialized && tts.isSpeaking) || (cloudPlayer?.isPlaying == true) } catch (_: Exception) { false }
+    }
+
+    private fun armSpeechWatchdog() {
+        speechWatchdogTask?.let { speechWatchdog.removeCallbacks(it) }
+        val task = Runnable {
+            try { if (::tts.isInitialized && tts.isSpeaking) tts.stop() } catch (_: Exception) {}
+            try { cloudPlayer?.stop() } catch (_: Exception) {}
+            finishSpeechTurn()
+        }
+        speechWatchdogTask = task
+        speechWatchdog.postDelayed(task, 35000L)
+    }
+
     private fun speak(message: String) {
         if (!::tts.isInitialized) { pendingSpeech = message; return }
         if (!ttsReady) {
@@ -2237,6 +2317,7 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
             return
         }
         if (::orbView.isInitialized) setJarvisMode(JarvisOrbView.Mode.SPEAKING)
+        armSpeechWatchdog()
         val result = try {
             tts.setAudioAttributes(android.media.AudioAttributes.Builder()
                 .setUsage(android.media.AudioAttributes.USAGE_MEDIA)
@@ -2261,6 +2342,7 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
         if (!cloudTts.isConfigured()) { pendingSpeech = message; status.text = "برای صدای فارسی آنلاین، کلید سرویس را وارد کن."; return }
         setJarvisMode(JarvisOrbView.Mode.SPEAKING)
         status.text = "در حال ساخت صدای فارسی JARVIS…"
+        armSpeechWatchdog()
         speechExecutor.execute {
             try {
                 val audioFile = cloudTts.synthesize(message)
@@ -2292,18 +2374,26 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
                 }
             } catch (e: Exception) {
                 runOnUiThread {
-                    status.text = "ساخت صدای فارسی ناموفق بود: ${e.message ?: "خطای شبکه"}"
-                    if (::orbView.isInitialized) setJarvisMode(JarvisOrbView.Mode.IDLE)
-                    finishSpeechTurn()
+                    if (ttsReady) {
+                        status.text = "صدای آنلاین پاسخ نداد؛ از صدای گوشی استفاده می‌کنم."
+                        speak(message)
+                    } else {
+                        status.text = "ساخت صدای فارسی ناموفق بود: ${e.message ?: "خطای شبکه"}"
+                        finishSpeechTurn()
+                    }
                 }
             }
         }
     }
 
     private fun finishSpeechTurn() {
+        speechWatchdogTask?.let { speechWatchdog.removeCallbacks(it) }
+        speechWatchdogTask = null
         if (::orbView.isInitialized) { orbView.setAudioLevel(0f); setJarvisMode(JarvisOrbView.Mode.IDLE) }
         if (voiceSessionActive && activityVisible && !isFinishing) {
-            android.os.Handler(mainLooper).postDelayed({ if (voiceSessionActive && activityVisible && !isFinishing) beginListening() }, 350)
+            android.os.Handler(mainLooper).postDelayed({
+                if (voiceSessionActive && activityVisible && !isFinishing && !isJarvisSpeaking()) beginListening()
+            }, 500)
             return
         }
         if (wakePromptPending && activityVisible && !isFinishing) {
@@ -2332,8 +2422,11 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
             return
         }
         if (requestCode == requestContactAction) {
-            if (grantResults.firstOrNull() == PackageManager.PERMISSION_GRANTED) openContactForAction(pendingSmsRecipient, pendingSmsBody, pendingContactAction)
-            else reply("مجوز لازم داده نشد؛ عملیات انجام نشد.")
+            if (grantResults.firstOrNull() == PackageManager.PERMISSION_GRANTED) {
+                openContactForAction(pendingSmsRecipient, pendingSmsBody, pendingContactAction)
+            } else if (pendingContactAction == "sms" && pendingSmsNumber.isNotBlank()) {
+                openSmsComposer(pendingSmsNumber, pendingSmsBody, pendingSmsRecipient)
+            } else reply("مجوز تماس داده نشد؛ عملیات انجام نشد.")
             return
         }
         if (requestCode == requestCorePermissions) {
@@ -2429,6 +2522,9 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
         try { cloudPlayer?.release() } catch (_: Exception) {}
         cloudPlayer = null
         speechExecutor.shutdownNow()
+        speechWatchdogTask?.let { speechWatchdog.removeCallbacks(it) }
+        aiRequestGeneration.incrementAndGet()
+        aiExecutor.shutdownNow()
         // Queue native cleanup behind any active inference to avoid freeing the model mid-generation.
         try {
             executor.execute { try { localAi.unload() } catch (_: Exception) { } }
