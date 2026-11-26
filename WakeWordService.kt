@@ -238,10 +238,27 @@ class WakeWordService : Service() {
             } catch (_: Exception) { "بازکردن جستجوی گوگل ممکن نشد؛ مرورگر را بررسی کن." }
         }
 
-        val appTarget = Regex("""^(?:لطفا\s+)?(.+?)\s+(?:رو\s+|را\s+)?(?:باز\s*کن|اجرا\s*کن|راه\s*بنداز)$""").find(q)?.groupValues?.get(1)?.trim()
+        val appTarget = (Regex("""^(?:لطفا\s+)?(.+?)\s+(?:رو\s+|را\s+)?(?:باز\s*کن|اجرا\s*کن|راه\s*بنداز)$""").find(q)?.groupValues?.get(1)?.trim()
             ?: Regex("""^(?:باز\s*کن|اجرا\s*کن)\s+(.+)$""").find(q)?.groupValues?.get(1)?.trim()
-            ?: return null
+            ?: return null).removePrefix("برنامه ").removePrefix("اپلیکیشن ").trim()
         return try {
+            val aliases = mapOf(
+                "اینستاگرام" to "com.instagram.android", "اینستا" to "com.instagram.android",
+                "instagram" to "com.instagram.android", "واتساپ" to "com.whatsapp",
+                "واتس اپ" to "com.whatsapp", "whatsapp" to "com.whatsapp",
+                "تلگرام" to "org.telegram.messenger", "telegram" to "org.telegram.messenger",
+                "یوتیوب" to "com.google.android.youtube", "youtube" to "com.google.android.youtube",
+                "کروم" to "com.android.chrome", "chrome" to "com.android.chrome",
+                "جیمیل" to "com.google.android.gm", "gmail" to "com.google.android.gm"
+            )
+            val aliasPackage = aliases.entries.firstOrNull { appTarget.contains(it.key, ignoreCase = true) }?.value
+            if (aliasPackage != null) {
+                val aliasIntent = packageManager.getLaunchIntentForPackage(aliasPackage)
+                    ?: return "برنامه " + appTarget + " روی گوشی نصب نیست."
+                aliasIntent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                startActivity(aliasIntent)
+                return "برنامه " + appTarget + " باز شد."
+            }
             val installed = packageManager.getInstalledApplications(PackageManager.GET_META_DATA)
             val target = appTarget.replace(Regex("""\s+"""), "")
             val candidates = installed.mapNotNull { info ->
