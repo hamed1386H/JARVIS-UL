@@ -120,67 +120,46 @@ class WakeWordService : Service() {
             recorder.startRecording()
             updateNotification("گوش‌به‌زنگ سریع آفلاین فعال است؛ بگو جارویس")
 
-            val windowSize = rate * 2
-            val ring = ShortArray(windowSize)
             val readBuffer = ShortArray(3200)
-            var writeAt = 0
-            var samplesSeen = 0
-            var nextCheckAt = windowSize
+            var waitingForCommandUntil = 0L
+            updateNotification("گوش‌به‌زنگ فعال است؛ بگو " + configuredWakePhrase())
+
             while (running.get()) {
-                val n = recorder.read(readBuffer, 0, readBuffer.size)
-                if (n == AudioRecord.ERROR_INVALID_OPERATION || n == AudioRecord.ERROR_BAD_VALUE ||
-                    n == AudioRecord.ERROR_DEAD_OBJECT) {
-                    throw IllegalStateException("ارتباط میکروفون قطع شد.")
-                }
-                if (n <= 0) continue
-                for (i in 0 until n) {
-                    ring[writeAt] = readBuffer[i]
-                    writeAt = (writeAt + 1) % windowSize
-                }
-                samplesSeen += n
-                if (samplesSeen < nextCheckAt) continue
-                nextCheckAt = samplesSeen + rate / 2
+                val utterance = captureUtterance(recorder, rate, readBuffer) ?: continue
+                val heard = normalizeSpeech(engine.transcribe(utterance))
+                if (heard.isBlank()) continue
 
-                var energy = 0.0
-                for (sample in ring) {
-                    val v = sample.toDouble()
-                    energy += v * v
-                }
-                val rms = sqrt(energy / windowSize) / 32768.0
-                if (rms < 0.006) continue
-
-                val audio = FloatArray(windowSize)
-                for (i in 0 until windowSize) {
-                    audio[i] = ring[(writeAt + i) % windowSize].toFloat() / 32768f
-                }
-                val heard = normalizeSpeech(engine.transcribe(audio))
-                if (heard.contains("جارویس") || heard.contains("jarvis")) {
-                    updateNotification("جارویس بیدار شد؛ فرمانت را بگو")
-                    // If the user said "Jarvis, ..." in one sentence, use the words already captured.
-                    // Otherwise wait for the next utterance without opening MainActivity.
-                    val sameUtterance = when {
+                val wakePhrase = configuredWakePhrase()
+                val wakeIndex = heard.indexOf(wakePhrase)
+                val hasWake = wakeIndex >= 0 || heard.contains("جارویس") || heard.contains("jarvis")
+                val command = if (hasWake) {
+                    when {
+                        wakeIndex >= 0 -> heard.substring(wakeIndex + wakePhrase.length).trim()
                         heard.contains("جارویس") -> heard.substringAfter("جارویس").trim()
                         else -> heard.substringAfter("jarvis").trim()
                     }
-                    val command = if (sameUtterance.length >= 2) {
-                        sameUtterance
-                    } else {
-                        val commandAudio = captureCommand(recorder, rate, readBuffer)
-                        if (commandAudio == null) "" else normalizeSpeech(engine.transcribe(commandAudio))
-                    }
-                    if (command.isBlank()) {
-                        showAnswerNotification("صدایی دریافت نکردم یا صدایت واضح نبود؛ دوباره بگو جارویس")
-                    } else {
-                        showAnswerNotification("درخواست: " + command + "\nدر حال آماده‌سازی پاسخ…", "در حال پردازش")
-                        val answer = answerInBackground(command)
-                        showAnswerNotification(answer)
-                    }
-                    ring.fill(0)
-                    writeAt = 0
-                    samplesSeen = 0
-                    nextCheckAt = windowSize
-                    updateNotification("گوش‌به‌زنگ فعال است؛ بگو جارویس")
+                } else ""
+
+                if (hasWake && command.length < 2) {
+                    waitingForCommandUntil = System.currentTimeMillis() + 15000L
+                    showAnswerNotification("در خدمتم؛ فرمانت را بگو")
+                    speakInBackground("در خدمتم")
+                    updateNotification("در انتظار فرمان تو هستم")
+                    continue
                 }
+
+                val actualCommand = when {
+                    hasWake && command.length >= 2 -> command
+                    !hasWake && System.currentTimeMillis() <= waitingForCommandUntil -> heard
+                    else -> continue
+                }
+
+                waitingForCommandUntil = 0L
+                showAnswerNotification("درخواست: " + actualCommand + "\nدر حال آماده‌سازی پاسخ…", "در حال پردازش")
+                val answer = answerInBackground(actualCommand)
+                showAnswerNotification(answer)
+                speakInBackground(answer.take(500))
+                updateNotification("گوش‌به‌زنگ فعال است؛ بگو " + configuredWakePhrase())
             }
         } catch (e: Exception) {
             updateNotification("گوش‌به‌زنگ متوقف شد: " + (e.message ?: "خطای میکروفون"))
@@ -192,34 +171,73 @@ class WakeWordService : Service() {
         }
     }
 
-    /** Wait for a spoken sentence; finish after about one second of silence. */
-    private fun captureCommand(recorder: AudioRecord, rate: Int, buffer: ShortArray): FloatArray? {
-        val samples = ArrayList<Short>(rate * 5)
-        var heardSpeech = false
+    /** Captures one complete utterance using VAD; Whisper runs once per utterance, not every half-second. */
+    private fun captureUtterance(recorder: AudioRecord, rate: Int, buffer: ShortArray): FloatArray? {
+        val samples = ArrayList<Short>(rate * 4)
+        var started = false
         var quietChunks = 0
         var elapsedChunks = 0
-        val maxChunks = 40
+        val maxChunks = 50 // 10 seconds with 200 ms reads
         while (running.get() && elapsedChunks < maxChunks) {
             val n = recorder.read(buffer, 0, buffer.size)
+            if (n == AudioRecord.ERROR_INVALID_OPERATION || n == AudioRecord.ERROR_BAD_VALUE ||
+                n == AudioRecord.ERROR_DEAD_OBJECT) throw IllegalStateException("میکروفون قطع شد.")
             if (n <= 0) continue
             elapsedChunks++
             var energy = 0.0
             for (i in 0 until n) {
-                val v = buffer[i].toDouble()
-                energy += v * v
+                val value = buffer[i].toDouble()
+                energy += value * value
             }
             val rms = sqrt(energy / n) / 32768.0
-            if (rms >= 0.006) {
-                heardSpeech = true
+            if (rms >= 0.0045) {
+                started = true
                 quietChunks = 0
-            } else if (heardSpeech) {
+            } else if (started) {
                 quietChunks++
             }
-            if (heardSpeech) for (i in 0 until n) samples.add(buffer[i])
-            if (heardSpeech && quietChunks >= 5) break
+            if (started) for (i in 0 until n) samples.add(buffer[i])
+            if (started && quietChunks >= 4) break
         }
-        if (!heardSpeech || samples.size < rate / 4) return null
+        if (!started || samples.size < rate / 4) return null
         return FloatArray(samples.size) { samples[it].toFloat() / 32768f }
+    }
+
+    private fun configuredWakePhrase(): String {
+        val raw = getSharedPreferences("cht_ai", Context.MODE_PRIVATE)
+            .getString("wake_phrase", "جارویس") ?: "جارویس"
+        return normalizeSpeech(raw).ifBlank { "جارویس" }
+    }
+
+    /** Uses the phone's installed Persian TTS engine for a short hands-free acknowledgement/answer. */
+    private fun speakInBackground(message: String) {
+        if (message.isBlank()) return
+        val ready = java.util.concurrent.CountDownLatch(1)
+        val finished = java.util.concurrent.CountDownLatch(1)
+        var speaker: android.speech.tts.TextToSpeech? = null
+        try {
+            speaker = android.speech.tts.TextToSpeech(this) { status ->
+                if (status == android.speech.tts.TextToSpeech.SUCCESS) {
+                    try {
+                        speaker?.language = java.util.Locale("fa", "IR")
+                        speaker?.setSpeechRate(1.08f)
+                        speaker?.setOnUtteranceProgressListener(object : android.speech.tts.UtteranceProgressListener() {
+                            override fun onStart(id: String?) {}
+                            override fun onDone(id: String?) { finished.countDown() }
+                            @Deprecated("Deprecated in Java")
+                            override fun onError(id: String?) { finished.countDown() }
+                        })
+                        speaker?.speak(message, android.speech.tts.TextToSpeech.QUEUE_FLUSH, null, "jarvis_bg_reply")
+                    } catch (_: Exception) { finished.countDown() }
+                } else finished.countDown()
+                ready.countDown()
+            }
+            ready.await(4, java.util.concurrent.TimeUnit.SECONDS)
+            finished.await(8, java.util.concurrent.TimeUnit.SECONDS)
+        } catch (_: Exception) {
+        } finally {
+            try { speaker?.stop(); speaker?.shutdown() } catch (_: Exception) {}
+        }
     }
 
     private fun normalizeSpeech(value: String): String = value.lowercase()
@@ -245,12 +263,13 @@ class WakeWordService : Service() {
         if (modelFile.isFile) {
             val local = LocalAiEngine()
             try {
-                local.load(modelFile.absolutePath, threads = 4, context = 2048)
-                val history = org.json.JSONArray()
+                // Shorter, direct prompts and a smaller output budget reduce latency on-device.
+                local.load(modelFile.absolutePath, threads = Runtime.getRuntime().availableProcessors().coerceIn(3, 6), context = 1536)
                 val prompt = agent.buildLocalPrompt(
-                    "کوتاه و دقیق به فارسی پاسخ بده: " + command.take(1800), history
+                    "فقط پاسخ کوتاه و مستقیم به فارسی بده. درخواست: " + command.take(900),
+                    org.json.JSONArray()
                 )
-                return local.generate(prompt, 160).replace(Regex("<think>[\\s\\S]*?</think>"), "")
+                return local.generate(prompt, 96).replace(Regex("<think>[\\s\\S]*?</think>"), "")
                     .trim().ifBlank { "پاسخ خالی بود؛ دوباره بگو." }
             } catch (e: Exception) {
                 return "نتوانستم پاسخ را آماده کنم: " + (e.message ?: "خطای مدل محلی")
