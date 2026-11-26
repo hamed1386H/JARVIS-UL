@@ -52,7 +52,7 @@ class JarvisAgentCore(context: Context) {
         }
     }
 
-    fun askOnline(userText: String): String {
+    fun askOnline(userText: String, maxTokens: Int = 384): String {
         require(userText.isNotBlank()) { "پیام خالی است." }
         val target = normalizedEndpoint()
         val modelName = model().trim()
@@ -60,8 +60,8 @@ class JarvisAgentCore(context: Context) {
 
         val connection = (URL(target).openConnection() as HttpURLConnection).apply {
             requestMethod = "POST"
-            connectTimeout = 20000
-            readTimeout = 60000
+            connectTimeout = 12000
+            readTimeout = 30000
             doOutput = true
             useCaches = false
             setRequestProperty("Content-Type", "application/json; charset=utf-8")
@@ -84,6 +84,7 @@ class JarvisAgentCore(context: Context) {
                 .put("model", modelName)
                 .put("messages", messages)
                 .put("temperature", 0.35)
+                .put("max_tokens", maxTokens.coerceIn(64, 768))
                 .put("stream", false)
                 .toString()
 
