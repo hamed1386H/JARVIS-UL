@@ -573,7 +573,7 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
             val xiaomiRecognizer = if (android.os.Build.VERSION.SDK_INT >= 31) {
                 try {
                     packageManager.queryIntentServices(
-                        Intent(SpeechRecognizer.SERVICE_INTERFACE), PackageManager.MATCH_ALL
+                        Intent(android.speech.RecognitionService.SERVICE_INTERFACE), PackageManager.MATCH_ALL
                     ).firstOrNull { service ->
                         val packageName = service.serviceInfo.packageName.lowercase(Locale.ROOT)
                         packageName.contains("xiaomi") || packageName.contains("miui") ||
