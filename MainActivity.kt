@@ -646,7 +646,7 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
     private fun promptWhisperModelDownload() {
         showModelDownloadDialog(
             title = "مدل چندزبانه تشخیص گفتار Whisper",
-            description = "مدل سبک Whisper Tiny Q5 حدود ۳۲ مگابایت است؛ برای سرعت بیشتر روی گوشی‌های میان‌رده، با کمی افت دقت نسبت به Base. دانلود مستقیم یا دانلود با Chrome و ADM را انتخاب کن.",
+            description = "مدل چندزبانه Whisper Base حدود ۱۴۲ مگابایت است؛ دقت بهتر از Tiny، با مصرف حافظه و زمان پردازش بیشتر. دانلود مستقیم یا دانلود با Chrome و ADM را انتخاب کن.",
             url = WHISPER_MODEL_URL,
             fileName = WHISPER_MODEL_FILENAME,
             isWhisper = true
@@ -1803,8 +1803,8 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
     }
 
     companion object {
-        private const val WHISPER_MODEL_FILENAME = "ggml-tiny-q5_1.bin"
-        private const val WHISPER_MODEL_URL = "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-tiny-q5_1.bin"
+        private const val WHISPER_MODEL_FILENAME = "ggml-base.bin"
+        private const val WHISPER_MODEL_URL = "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-base.bin"
         private const val KEY_WHISPER_DOWNLOAD_ID = "jarvis_whisper_download_id"
         private const val MODEL_FILENAME = "Qwen_Qwen3-1.7B-Q4_K_M.gguf"
         private const val MODEL_URL = "https://huggingface.co/bartowski/Qwen_Qwen3-1.7B-GGUF/resolve/main/Qwen_Qwen3-1.7B-Q4_K_M.gguf"
