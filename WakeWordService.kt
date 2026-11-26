@@ -341,7 +341,9 @@ class WakeWordService : Service() {
                 }
                 "درخواست تماس با " + match.name + " به سرویس تماس گوشی سپرده شد."
             } else {
-                val sms = if (android.os.Build.VERSION.SDK_INT >= 31) getSystemService(SmsManager::class.java) else SmsManager.getDefault()
+                val sms = if (android.os.Build.VERSION.SDK_INT >= 31) {
+                    getSystemService(SmsManager::class.java) ?: throw IllegalStateException("سرویس پیامک در دسترس نیست")
+                } else SmsManager.getDefault()
                 val parts = sms.divideMessage(body)
                 val batchId = System.currentTimeMillis()
                 val callbacks = ArrayList<android.app.PendingIntent>()
@@ -390,8 +392,8 @@ class WakeWordService : Service() {
                     start()
                 }
                 completed.await(35, java.util.concurrent.TimeUnit.SECONDS)
-                try { player.stop() } catch (_: Exception) {}
-                try { player.release() } catch (_: Exception) {}
+                try { player?.stop() } catch (_: Exception) {}
+                try { player?.release() } catch (_: Exception) {}
                 player = null
                 try { audioFile.delete() } catch (_: Exception) {}
                 return
