@@ -108,154 +108,84 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
     }
 
     private fun buildUi() {
-        window.statusBarColor = Color.rgb(3, 5, 16)
-        window.navigationBarColor = Color.rgb(3, 5, 16)
+        window.statusBarColor = Color.rgb(2, 2, 9)
+        window.navigationBarColor = Color.rgb(2, 2, 9)
         if (android.os.Build.VERSION.SDK_INT >= 29) {
             window.isNavigationBarContrastEnforced = false
             window.isStatusBarContrastEnforced = false
         }
         window.decorView.systemUiVisibility = View.SYSTEM_UI_FLAG_LAYOUT_STABLE or View.SYSTEM_UI_FLAG_LAYOUT_FULLSCREEN
-
         val root = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
-            setPadding(dp(20), dp(38), dp(20), dp(12))
+            setPadding(dp(18), dp(38), dp(18), dp(12))
             background = android.graphics.drawable.GradientDrawable(
                 android.graphics.drawable.GradientDrawable.Orientation.TL_BR,
-                intArrayOf(Color.rgb(3, 5, 17), Color.rgb(7, 10, 29), Color.rgb(2, 3, 11))
+                intArrayOf(Color.rgb(2, 2, 10), Color.rgb(8, 5, 22), Color.rgb(1, 3, 12))
             )
         }
-
         val header = LinearLayout(this).apply { gravity = Gravity.CENTER_VERTICAL }
+        header.addView(actionButton("☰", "منوی جارویس") { showJarvisMenu() }, LinearLayout.LayoutParams(dp(48), dp(44)))
         val brand = TextView(this).apply {
-            text = "J A R V I S"
-            textSize = 25f
-            letterSpacing = 0.30f
-            setTextColor(Color.rgb(246, 247, 255))
-            typeface = Typeface.create("sans-serif-light", Typeface.NORMAL)
+            text = "J A R V I S"; textSize = 23f; letterSpacing = 0.28f; gravity = Gravity.CENTER
+            setTextColor(Color.rgb(245, 244, 255)); typeface = Typeface.create("sans-serif-light", Typeface.NORMAL)
         }
         header.addView(brand, LinearLayout.LayoutParams(0, -2, 1f))
-        header.addView(actionButton("⚙", "تنظیمات JARVIS") { showJarvisSettings() },
-            LinearLayout.LayoutParams(dp(54), dp(46)))
+        header.addView(actionButton("⚙", "تنظیمات JARVIS") { showJarvisSettings() }, LinearLayout.LayoutParams(dp(48), dp(44)))
         root.addView(header)
-
         dynamicIsland = TextView(this).apply {
-            text = "●  JARVIS  ·  آماده‌باش"
-            textSize = 11f
-            letterSpacing = 0.06f
-            gravity = Gravity.CENTER
-            setTextColor(Color.rgb(211, 202, 255))
-            setPadding(dp(20), dp(9), dp(20), dp(9))
-            background = android.graphics.drawable.GradientDrawable().apply {
-                setColor(Color.rgb(9, 9, 24))
-                cornerRadius = dp(28).toFloat()
-                setStroke(dp(1), Color.rgb(105, 75, 190))
-            }
-            elevation = dp(8).toFloat()
+            text = "●  JARVIS  ·  آماده‌باش"; textSize = 11f; letterSpacing = 0.04f; gravity = Gravity.CENTER
+            setTextColor(Color.rgb(220, 208, 255)); setPadding(dp(22), dp(10), dp(22), dp(10))
+            background = glass(Color.rgb(7, 6, 18), Color.rgb(116, 65, 205), 30); elevation = dp(10).toFloat()
         }
         root.addView(LinearLayout(this).apply {
-            gravity = Gravity.CENTER
-            setPadding(0, dp(9), 0, dp(2))
+            gravity = Gravity.CENTER; setPadding(0, dp(14), 0, dp(4))
             addView(dynamicIsland, LinearLayout.LayoutParams(-2, -2))
         })
-
-        val subtitle = TextView(this).apply {
-            text = "VOICE INTERFACE  •  LOCAL INTELLIGENCE  •  فارسی"
-            textSize = 10f
-            letterSpacing = 0.14f
-            setTextColor(Color.rgb(91, 220, 232))
-            setPadding(dp(2), dp(3), dp(2), dp(2))
-        }
-        root.addView(subtitle)
-
-        val pill = TextView(this).apply {
-            text = "✦   NEURAL INTERFACE   •   فارسی"
-            textSize = 11f
-            letterSpacing = 0.08f
-            gravity = Gravity.CENTER
-            setTextColor(Color.rgb(205, 190, 255))
-            setPadding(dp(20), dp(10), dp(20), dp(10))
-            background = glass(Color.rgb(20, 12, 43), Color.rgb(116, 76, 210), 40)
-        }
-        root.addView(LinearLayout(this).apply {
-            gravity = Gravity.CENTER
-            setPadding(0, dp(10), 0, dp(0))
-            addView(pill)
-        })
-
+        val orbStage = FrameLayout(this).apply { clipChildren = false; clipToPadding = false }
         orbView = JarvisOrbView(this)
-        root.addView(orbView, LinearLayout.LayoutParams(-1, dp(208)))
-
+        orbView.setOnClickListener { beginListening() }
+        orbStage.addView(orbView, FrameLayout.LayoutParams(-1, -1))
+        root.addView(orbStage, LinearLayout.LayoutParams(-1, 0, 1f))
         status = TextView(this).apply {
-            text = "در انتظار فرمان تو"
-            textSize = 13f
-            gravity = Gravity.CENTER
-            setTextColor(Color.rgb(166, 181, 222))
-            setPadding(dp(8), 0, dp(8), dp(12))
+            text = "برای صحبت، روی گوی نورانی بزن"; textSize = 13f; gravity = Gravity.CENTER
+            setTextColor(Color.rgb(177, 183, 215)); setPadding(dp(8), dp(2), dp(8), dp(12))
         }
         root.addView(status)
-
+        lateinit var composer: LinearLayout
+        lateinit var chatToggle: Button
         val chatShell = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
-            background = glass(Color.argb(220, 10, 8, 25), Color.rgb(83, 57, 145), 24)
-            setPadding(dp(15), dp(14), dp(15), dp(14))
+            background = glass(Color.argb(225, 10, 8, 25), Color.rgb(90, 56, 160), 22)
+            setPadding(dp(13), dp(10), dp(13), dp(10)); visibility = View.GONE
         }
         val chatHeader = LinearLayout(this).apply { gravity = Gravity.CENTER_VERTICAL }
-        val chatTitle = TextView(this).apply {
-            text = "گفتگوی امن"
-            textSize = 12f
-            setTextColor(Color.rgb(177, 190, 235))
-            typeface = Typeface.DEFAULT_BOLD
-        }
-        chatHeader.addView(chatTitle, LinearLayout.LayoutParams(0, -2, 1f))
         chatHeader.addView(TextView(this).apply {
-            text = "LOCAL AI"
-            textSize = 9f
-            letterSpacing = 0.12f
-            setTextColor(Color.rgb(105, 224, 210))
-            setPadding(dp(9), dp(5), dp(9), dp(5))
-            background = glass(Color.rgb(10, 36, 42), Color.rgb(42, 125, 132), 20)
-        })
+            text = "گفتگوی JARVIS"; textSize = 12f; setTextColor(Color.rgb(203, 194, 235)); typeface = Typeface.DEFAULT_BOLD
+        }, LinearLayout.LayoutParams(0, -2, 1f))
         chatShell.addView(chatHeader)
-        val divider = View(this).apply { setBackgroundColor(Color.rgb(38, 47, 82)) }
-        chatShell.addView(divider, LinearLayout.LayoutParams(-1, dp(1)).apply { topMargin = dp(10); bottomMargin = dp(8) })
-
+        val divider = View(this).apply { setBackgroundColor(Color.rgb(47, 37, 78)) }
+        chatShell.addView(divider, LinearLayout.LayoutParams(-1, dp(1)).apply { topMargin = dp(7); bottomMargin = dp(5) })
         log = TextView(this).apply {
-            text = "سلام، من JARVIS هستم.\nبرای شروع، صحبت کن یا پیامت را بنویس.\n\nبرای فعال‌سازی مغز هوشمند، مدل Qwen3 را از تنظیمات دریافت کن."
-            textSize = 15f
-            setLineSpacing(dp(5).toFloat(), 1.02f)
-            setTextColor(Color.rgb(231, 236, 255))
-            setPadding(dp(4), dp(6), dp(4), dp(8))
-            gravity = Gravity.TOP or Gravity.START
+            text = "سلام، من JARVIS هستم.\nبرای شروع، صحبت کن یا پیامت را بنویس."
+            textSize = 14f; setLineSpacing(dp(4).toFloat(), 1.02f); setTextColor(Color.rgb(235, 234, 250))
+            setPadding(dp(3), dp(4), dp(3), dp(6)); gravity = Gravity.TOP or Gravity.START
             textDirection = View.TEXT_DIRECTION_FIRST_STRONG_RTL
         }
         chatScroll = ScrollView(this).apply {
-            isFillViewport = true
-            overScrollMode = View.OVER_SCROLL_NEVER
-            isVerticalScrollBarEnabled = true
-            addView(log)
-            setBackgroundColor(Color.TRANSPARENT)
+            isFillViewport = true; overScrollMode = View.OVER_SCROLL_NEVER; isVerticalScrollBarEnabled = true
+            addView(log); setBackgroundColor(Color.TRANSPARENT)
         }
-        chatShell.addView(chatScroll, LinearLayout.LayoutParams(-1, 0, 1f))
-        root.addView(chatShell, LinearLayout.LayoutParams(-1, 0, 1f).apply {
-            topMargin = dp(4)
-            bottomMargin = dp(12)
-        })
-
-        val composer = LinearLayout(this).apply {
-            orientation = LinearLayout.HORIZONTAL
-            gravity = Gravity.CENTER_VERTICAL
-            background = glass(Color.rgb(12, 10, 29), Color.rgb(111, 76, 190), 24)
-            setPadding(dp(10), dp(7), dp(8), dp(7))
+        chatShell.addView(chatScroll, LinearLayout.LayoutParams(-1, dp(142)))
+        root.addView(chatShell, LinearLayout.LayoutParams(-1, -2).apply { bottomMargin = dp(7) })
+        composer = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL
+            background = glass(Color.rgb(10, 8, 24), Color.rgb(108, 66, 185), 24)
+            setPadding(dp(8), dp(5), dp(7), dp(5)); visibility = View.GONE
         }
         input = EditText(this).apply {
-            hint = "پیامت را برای JARVIS بنویس…"
-            setHintTextColor(Color.rgb(126, 139, 174))
-            setTextColor(Color.WHITE)
-            textSize = 14f
-            setSingleLine(true)
-            setPadding(dp(9), dp(9), dp(9), dp(9))
-            setBackgroundColor(Color.TRANSPARENT)
-            imeOptions = android.view.inputmethod.EditorInfo.IME_ACTION_SEND
+            hint = "پیامت را برای JARVIS بنویس…"; setHintTextColor(Color.rgb(130, 128, 160))
+            setTextColor(Color.WHITE); textSize = 14f; setSingleLine(true); setPadding(dp(8), dp(8), dp(8), dp(8))
+            setBackgroundColor(Color.TRANSPARENT); imeOptions = android.view.inputmethod.EditorInfo.IME_ACTION_SEND
             textDirection = View.TEXT_DIRECTION_FIRST_STRONG_RTL
         }
         composer.addView(input, LinearLayout.LayoutParams(0, -2, 1f))
@@ -264,21 +194,34 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
                 (event?.keyCode == android.view.KeyEvent.KEYCODE_ENTER && event.action == android.view.KeyEvent.ACTION_DOWN)
             if (sendByIme) { sendTextMessage(); true } else false
         }
-        composer.addView(actionButton("◉", "شروع صحبت با میکروفون") { beginListening() },
-            LinearLayout.LayoutParams(dp(52), dp(48)).apply { marginEnd = dp(8) })
-        composer.addView(actionButton("➤", "ارسال پیام") { sendTextMessage() },
-            LinearLayout.LayoutParams(dp(52), dp(48)))
-        val quickActions = LinearLayout(this).apply {
-            orientation = LinearLayout.HORIZONTAL
-            gravity = Gravity.CENTER
-            setPadding(0, 0, 0, dp(8))
+        composer.addView(actionButton("➤", "ارسال پیام") { sendTextMessage() }, LinearLayout.LayoutParams(dp(48), dp(44)))
+        root.addView(composer, LinearLayout.LayoutParams(-1, -2).apply { bottomMargin = dp(8) })
+        chatToggle = actionButton("چت", "نمایش گفتگوی متنی") {
+            val show = chatShell.visibility != View.VISIBLE
+            chatShell.visibility = if (show) View.VISIBLE else View.GONE
+            composer.visibility = if (show) View.VISIBLE else View.GONE
+            chatToggle.text = if (show) "بستن چت" else "چت"
         }
-        quickActions.addView(actionButton("▦", "برنامه‌ها") { showApps() }, LinearLayout.LayoutParams(0, dp(42), 1f).apply { marginEnd = dp(6) })
-        quickActions.addView(actionButton("↓", "دریافت مدل") { promptRecommendedModelDownload() }, LinearLayout.LayoutParams(0, dp(42), 1f).apply { marginEnd = dp(6) })
-        quickActions.addView(actionButton("⚙", "تنظیمات") { showJarvisSettings() }, LinearLayout.LayoutParams(0, dp(42), 1f))
-        root.addView(quickActions)
-        root.addView(composer)
+        val bottomControls = LinearLayout(this).apply { gravity = Gravity.CENTER; orientation = LinearLayout.HORIZONTAL }
+        bottomControls.addView(chatToggle, LinearLayout.LayoutParams(0, dp(48), 1f).apply { marginEnd = dp(8) })
+        bottomControls.addView(actionButton("🎙", "شروع صحبت با میکروفون") { beginListening() }, LinearLayout.LayoutParams(0, dp(52), 1f))
+        root.addView(bottomControls)
         setContentView(root)
+    }
+
+    private fun showJarvisMenu() {
+        val items = arrayOf("خانه و دستیار صوتی", "گفتگوی متنی", "تنظیمات", "برنامه‌های گوشی", "درباره JARVIS")
+        AlertDialog.Builder(this).setTitle("منوی JARVIS").setItems(items) { _, which ->
+            when (which) {
+                0 -> { setJarvisMode(JarvisOrbView.Mode.IDLE); status.text = "برای صحبت، روی گوی نورانی بزن" }
+                1 -> status.text = "برای باز کردن گفتگوی متنی، دکمه «چت» پایین صفحه را بزن"
+                2 -> showJarvisSettings()
+                3 -> showApps()
+                4 -> AlertDialog.Builder(this).setTitle("درباره JARVIS")
+                    .setMessage("دستیار هوشمند صوتی و متنی فارسی\nبا پشتیبانی از مدل محلی و موتور آنلاین اختیاری.")
+                    .setPositiveButton("باشه", null).show()
+            }
+        }.setNegativeButton("بستن", null).show()
     }
 
     private fun setJarvisMode(mode: JarvisOrbView.Mode) {
