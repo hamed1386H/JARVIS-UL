@@ -83,7 +83,8 @@ app.get("/api/history", auth, (req, res) => {
 app.delete("/api/history", auth, (req, res) => {
   db.prepare("DELETE FROM messages").run();
   res.json({ ok: true });
-});\napp.post("/api/chat", auth, chatLimiter, async (req, res) => {
+});
+app.post("/api/chat", auth, chatLimiter, async (req, res) => {
   const text = typeof req.body?.message === "string" ? req.body.message.trim() : "";
   if (!text || text.length > 8000) return res.status(400).json({ error: "پیام خالی است یا بیش از ۸۰۰۰ نویسه دارد." });
   if (!AI_API_KEY) return res.status(503).json({ error: "مغز آنلاین هنوز روی سرور پیکربندی نشده؛ مدیر باید AI_API_KEY را در تنظیمات سرور ثبت کند." });
