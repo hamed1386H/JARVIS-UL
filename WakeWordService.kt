@@ -284,7 +284,7 @@ class WakeWordService : Service() {
 
     private fun executeBackgroundPhoneAction(command: String): String? {
         val q = normalizeSpeech(command).replace(Regex("\\s+"), " ").trim()
-        val smsMatch = Regex("""به\s+(.+?)\s+(?:پیام\s*بده|پیامک\s*بده|اس\s*ام\s*اس\s*بده)""").find(q)
+        val smsMatch = Regex("""به\s+(.+?)\s+(?:پیام\s*(?:بده|بفرست|ارسال\s*کن)|پیامک\s*(?:بده|بفرست|ارسال\s*کن)|اس\s*ام\s*اس\s*(?:بده|بفرست|ارسال\s*کن))""").find(q)
         val callMatch = Regex("""^(?:لطفا\s+)?(?:به|با)\s+(.+?)\s+(?:زنگ\s+بزن|تماس\s+بگیر|تلفن\s+کن)$""").find(q)
         val isSms = smsMatch != null
         val recipient = (smsMatch?.groupValues?.get(1) ?: callMatch?.groupValues?.get(1))?.trim() ?: return null
