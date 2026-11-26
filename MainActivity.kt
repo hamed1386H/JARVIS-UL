@@ -1515,7 +1515,8 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
         if (!callRecipient.isNullOrBlank()) { beginContactAction(callRecipient, "", "call"); return }
         val smsRequest = parseSmsRequest(raw)
         if (smsRequest != null) { beginContactAction(smsRequest.first, smsRequest.second, "sms"); return }
-        if (q.contains("پیام بده") || q.contains("پیامک بده") || q.contains("اس ام اس بده")) {
+        if (q.contains("پیام بده") || q.contains("پیام بفرست") || q.contains("پیام ارسال کن") ||
+            q.contains("پیامک بده") || q.contains("پیامک بفرست") || q.contains("اس ام اس بده") || q.contains("اس ام اس بفرست")) {
             reply("برای پیام‌دادن بگو: به نام مخاطب پیام بده، بنویس متن پیام"); return
         }
         val requestedApp = extractAppLaunchTarget(q)
@@ -1551,8 +1552,8 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
     private fun parseSmsRequest(raw: String): Pair<String, String>? {
         val q = normalize(raw).replace(Regex("[،,؛;]+"), " ").replace(Regex("\\s+"), " ").trim()
         val recipientPatterns = listOf(
-            Regex("""به\s+(.+?)\s+(?:پیام\s*بده|پیامک\s*بده|اس\s*ام\s*اس\s*بده)"""),
-            Regex("""(?:پیام|پیامک)\s+به\s+(.+?)\s+(?:بده|ارسال\s+کن)""")
+            Regex("""به\s+(.+?)\s+(?:پیام\s*(?:بده|بفرست|ارسال\s*کن)|پیامک\s*(?:بده|بفرست|ارسال\s*کن)|اس\s*ام\s*اس\s*(?:بده|بفرست|ارسال\s*کن))"""),
+            Regex("""(?:پیام|پیامک)\s+به\s+(.+?)\s+(?:بده|بفرست|ارسال\s+کن)""")
         )
         val recipientMatch = recipientPatterns.firstNotNullOfOrNull { it.find(q) } ?: return null
         val recipient = recipientMatch.groupValues[1].trim().trim(',', '،', '.', '!')
