@@ -39,6 +39,7 @@ import kotlin.math.roundToInt
 class MainActivity : Activity(), TextToSpeech.OnInitListener {
     private lateinit var status: TextView
     private lateinit var orbView: JarvisOrbView
+    private lateinit var dynamicIsland: TextView
     private val voiceCaptureActive = java.util.concurrent.atomic.AtomicBoolean(false)
     private val whisperLoadActive = java.util.concurrent.atomic.AtomicBoolean(false)
     private lateinit var log: TextView
@@ -137,6 +138,26 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
             LinearLayout.LayoutParams(dp(54), dp(46)))
         root.addView(header)
 
+        dynamicIsland = TextView(this).apply {
+            text = "●  JARVIS  ·  آماده‌باش"
+            textSize = 11f
+            letterSpacing = 0.06f
+            gravity = Gravity.CENTER
+            setTextColor(Color.rgb(211, 202, 255))
+            setPadding(dp(20), dp(9), dp(20), dp(9))
+            background = android.graphics.drawable.GradientDrawable().apply {
+                setColor(Color.rgb(9, 9, 24))
+                cornerRadius = dp(28).toFloat()
+                setStroke(dp(1), Color.rgb(105, 75, 190))
+            }
+            elevation = dp(8).toFloat()
+        }
+        root.addView(LinearLayout(this).apply {
+            gravity = Gravity.CENTER
+            setPadding(0, dp(9), 0, dp(2))
+            addView(dynamicIsland, LinearLayout.LayoutParams(-2, -2))
+        })
+
         val subtitle = TextView(this).apply {
             text = "VOICE INTERFACE  •  LOCAL INTELLIGENCE  •  فارسی"
             textSize = 10f
@@ -147,13 +168,13 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
         root.addView(subtitle)
 
         val pill = TextView(this).apply {
-            text = "●   JARVIS   •   AI CORE"
+            text = "✦   NEURAL INTERFACE   •   فارسی"
             textSize = 11f
             letterSpacing = 0.08f
             gravity = Gravity.CENTER
-            setTextColor(Color.rgb(190, 199, 255))
+            setTextColor(Color.rgb(205, 190, 255))
             setPadding(dp(20), dp(10), dp(20), dp(10))
-            background = glass(Color.rgb(13, 17, 43), Color.rgb(83, 91, 177), 40)
+            background = glass(Color.rgb(20, 12, 43), Color.rgb(116, 76, 210), 40)
         }
         root.addView(LinearLayout(this).apply {
             gravity = Gravity.CENTER
@@ -175,7 +196,7 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
 
         val chatShell = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
-            background = glass(Color.argb(205, 10, 13, 29), Color.rgb(48, 57, 103), 24)
+            background = glass(Color.argb(220, 10, 8, 25), Color.rgb(83, 57, 145), 24)
             setPadding(dp(15), dp(14), dp(15), dp(14))
         }
         val chatHeader = LinearLayout(this).apply { gravity = Gravity.CENTER_VERTICAL }
@@ -223,7 +244,7 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
         val composer = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER_VERTICAL
-            background = glass(Color.rgb(15, 18, 39), Color.rgb(82, 91, 157), 24)
+            background = glass(Color.rgb(12, 10, 29), Color.rgb(111, 76, 190), 24)
             setPadding(dp(10), dp(7), dp(8), dp(7))
         }
         input = EditText(this).apply {
@@ -258,6 +279,29 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
         root.addView(quickActions)
         root.addView(composer)
         setContentView(root)
+    }
+
+    private fun setJarvisMode(mode: JarvisOrbView.Mode) {
+        if (::orbView.isInitialized) orbView.setMode(mode)
+        if (!::dynamicIsland.isInitialized) return
+        val label = when (mode) {
+            JarvisOrbView.Mode.IDLE -> "●  JARVIS  ·  آماده‌باش"
+            JarvisOrbView.Mode.LISTENING -> "◉  در حال گوش‌دادن به صدای تو…"
+            JarvisOrbView.Mode.THINKING -> "✧  در حال پردازش فرمان…"
+            JarvisOrbView.Mode.SPEAKING -> "♫  JARVIS در حال صحبت…"
+        }
+        dynamicIsland.text = label
+        val active = mode != JarvisOrbView.Mode.IDLE
+        dynamicIsland.setPadding(dp(if (active) 25 else 20), dp(if (active) 12 else 9), dp(if (active) 25 else 20), dp(if (active) 12 else 9))
+        val stroke = when (mode) {
+            JarvisOrbView.Mode.LISTENING -> Color.rgb(45, 190, 235)
+            JarvisOrbView.Mode.THINKING -> Color.rgb(150, 91, 245)
+            JarvisOrbView.Mode.SPEAKING -> Color.rgb(70, 205, 190)
+            JarvisOrbView.Mode.IDLE -> Color.rgb(105, 75, 190)
+        }
+        dynamicIsland.background = android.graphics.drawable.GradientDrawable().apply {
+            setColor(Color.rgb(9, 9, 24)); cornerRadius = dp(28).toFloat(); setStroke(dp(1), stroke)
+        }
     }
 
     private fun dp(value: Int): Int = (value * resources.displayMetrics.density).toInt()
@@ -548,7 +592,7 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
             return
         }
         status.text = "JARVIS گوش می‌دهد؛ واضح و نزدیک صحبت کن."
-        orbView.setMode(JarvisOrbView.Mode.LISTENING)
+        setJarvisMode(JarvisOrbView.Mode.LISTENING)
         try {
             voiceExecutor.execute {
                 var recorder: AudioRecord? = null
@@ -609,7 +653,7 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
                     runOnUiThread {
                         if (::orbView.isInitialized) {
                             orbView.setAudioLevel(0f)
-                            orbView.setMode(JarvisOrbView.Mode.THINKING)
+                            setJarvisMode(JarvisOrbView.Mode.THINKING)
                         }
                         status.text = "در حال تبدیل صدای فارسی به متن…"
                     }
@@ -621,7 +665,7 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
                             handleCommand(words)
                         } else {
                             status.text = "گفتار واضحی تشخیص داده نشد؛ دوباره امتحان کن."
-                            orbView.setMode(JarvisOrbView.Mode.IDLE)
+                            setJarvisMode(JarvisOrbView.Mode.IDLE)
                         }
                     }
                 } catch (e: Exception) {
@@ -643,7 +687,7 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
                         if (::orbView.isInitialized) {
                             orbView.setAudioLevel(0f)
                             if (!::tts.isInitialized || !tts.isSpeaking) {
-                                orbView.setMode(JarvisOrbView.Mode.IDLE)
+                                setJarvisMode(JarvisOrbView.Mode.IDLE)
                             }
                         }
                     }
@@ -1632,7 +1676,7 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
             return
         }
         status.text = if (onlineConfigured) "در حال اتصال امن به دستیار آنلاین…" else "در حال فکر کردن روی گوشی…"
-        orbView.setMode(JarvisOrbView.Mode.THINKING)
+        setJarvisMode(JarvisOrbView.Mode.THINKING)
         executor.execute {
             try {
                 val historyText = buildString {
@@ -1729,7 +1773,7 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
     private fun speak(message: String) {
         if (!ttsReady) { pendingSpeech = message; return }
         if (::orbView.isInitialized && ::tts.isInitialized) {
-            orbView.setMode(JarvisOrbView.Mode.SPEAKING)
+            setJarvisMode(JarvisOrbView.Mode.SPEAKING)
             tts.speak(message, TextToSpeech.QUEUE_FLUSH, null, "jarvis_reply")
         }
     }
@@ -1760,16 +1804,16 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
         if (code == TextToSpeech.SUCCESS) {
             tts.setOnUtteranceProgressListener(object : UtteranceProgressListener() {
                 override fun onStart(utteranceId: String?) {
-                    runOnUiThread { if (::orbView.isInitialized) { orbView.setMode(JarvisOrbView.Mode.SPEAKING); orbView.setAudioLevel(0.15f) } }
+                    runOnUiThread { if (::orbView.isInitialized) { setJarvisMode(JarvisOrbView.Mode.SPEAKING); orbView.setAudioLevel(0.15f) } }
                 }
                 override fun onDone(utteranceId: String?) {
                     runOnUiThread {
-                        if (::orbView.isInitialized) { orbView.setAudioLevel(0f); orbView.setMode(JarvisOrbView.Mode.IDLE) }
+                        if (::orbView.isInitialized) { orbView.setAudioLevel(0f); setJarvisMode(JarvisOrbView.Mode.IDLE) }
                         // Do not reopen the microphone after speech: prevents JARVIS hearing its own TTS.
                     }
                 }
                 override fun onError(utteranceId: String?) {
-                    runOnUiThread { if (::orbView.isInitialized) { orbView.setAudioLevel(0f); orbView.setMode(JarvisOrbView.Mode.IDLE) } }
+                    runOnUiThread { if (::orbView.isInitialized) { orbView.setAudioLevel(0f); setJarvisMode(JarvisOrbView.Mode.IDLE) } }
                 }
                 override fun onAudioAvailable(utteranceId: String?, audio: ByteArray?) {
                     if (audio == null || audio.size < 2) return
