@@ -1619,13 +1619,13 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
         // Normalize Persian ASR punctuation, wake words and polite suffixes before parsing.
         val q = normalize(raw)
             .replace(Regex("[،,؛;.!؟?]+"), " ")
-            .replace(Regex("\s+"), " ")
+            .replace(Regex("\\s+"), " ")
             .trim()
-            .replace(Regex("^(?:(?:هی|سلام)\s+)?جارویس[\s،,:-]*"), "")
-            .replace(Regex("^(?:لطفا|لطفاً|خواهشا|خواهشاً)\s+"), "")
-            .replace(Regex("\s+(?:لطفا|لطفاً|خواهشا|خواهشاً)$"), "")
+            .replace(Regex("^(?:(?:هی|سلام)\\s+)?جارویس[\\s،,:-]*"), "")
+            .replace(Regex("^(?:لطفا|لطفاً|خواهشا|خواهشاً)\\s+"), "")
+            .replace(Regex("\\s+(?:لطفا|لطفاً|خواهشا|خواهشاً)$"), "")
             .trim()
-        // IMPORTANT: Kotlin raw strings need a single backslash for regex tokens such as \s.
+        // Kotlin raw regex strings use a single backslash (\\s is only for quoted strings).
         val patterns = listOf(
             Regex("""^(?:به|با)\s+(.+?)\s+(?:(?:رو|را)\s+)?(?:زنگ\s+بزن(?:ید)?|تماس\s+بگیر(?:ید)?|تلفن\s+کن(?:ید)?)$"""),
             Regex("""^(.+?)\s+(?:رو|را)\s+(?:تماس\s+بگیر(?:ید)?|زنگ\s+بزن(?:ید)?)$"""),
@@ -2480,6 +2480,7 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
     }
 
     private fun finishSpeechTurn() {
+        cloudSpeechPending = false
         speechWatchdogTask?.let { speechWatchdog.removeCallbacks(it) }
         speechWatchdogTask = null
         if (::orbView.isInitialized) { orbView.setAudioLevel(0f); setJarvisMode(JarvisOrbView.Mode.IDLE) }
