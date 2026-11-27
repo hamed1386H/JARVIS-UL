@@ -286,7 +286,7 @@ class WakeWordService : Service() {
     }
 
     private fun executeBackgroundPhoneAction(command: String): String? {
-        val q = normalizeSpeech(command).replace(Regex("\s+"), " ").trim()
+        val q = normalizeSpeech(command).replace(Regex("\\s+"), " ").trim()
         val simSlot = when {
             Regex("""(?:سیم ?کارت|سیم)\s*(?:یک|اول|۱|1)""").containsMatchIn(q) -> 0
             Regex("""(?:سیم ?کارت|سیم)\s*(?:دو|دوم|۲|2)""").containsMatchIn(q) -> 1
@@ -314,11 +314,11 @@ class WakeWordService : Service() {
             contentResolver.query(ContactsContract.CommonDataKinds.Phone.CONTENT_URI, projection, null, null, null)?.use { cursor ->
                 val nameCol = cursor.getColumnIndexOrThrow(ContactsContract.CommonDataKinds.Phone.DISPLAY_NAME)
                 val numberCol = cursor.getColumnIndexOrThrow(ContactsContract.CommonDataKinds.Phone.NUMBER)
-                val target = recipient.replace(Regex("\s+"), "")
+                val target = recipient.replace(Regex("\\s+"), "")
                 while (cursor.moveToNext()) {
                     val name = cursor.getString(nameCol).orEmpty()
                     val number = cursor.getString(numberCol).orEmpty()
-                    val normalized = normalizeSpeech(name).replace(Regex("\s+"), "")
+                    val normalized = normalizeSpeech(name).replace(Regex("\\s+"), "")
                     val score = when {
                         normalized == target -> 100
                         normalized.startsWith(target) || target.startsWith(normalized) -> 80
@@ -469,7 +469,7 @@ class WakeWordService : Service() {
         .replace('٥','5').replace('٦','6').replace('٧','7').replace('٨','8').replace('٩','9')
         .replace('۰','0').replace('۱','1').replace('۲','2').replace('۳','3').replace('۴','4')
         .replace('۵','5').replace('۶','6').replace('۷','7').replace('۸','8').replace('۹','9')
-        .replace("‌", " ").replace(Regex("\s+"), " ").trim()
+        .replace("‌", " ").replace(Regex("\\s+"), " ").trim()
 
     private fun answerInBackground(command: String): String {
         val agent = JarvisAgentCore(this)
