@@ -20,6 +20,7 @@ import java.util.concurrent.atomic.AtomicBoolean
 import kotlin.math.sqrt
 
 /** Local-only wake listener. Uses short overlapping windows and voice-activity gating. */
+// Build includes the SIM permission and wake full-screen behavior.
 class WakeWordService : Service() {
     private val running = AtomicBoolean(false)
     private var worker: Thread? = null
