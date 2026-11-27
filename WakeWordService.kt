@@ -494,7 +494,7 @@ class WakeWordService : Service() {
                     "فقط پاسخ کوتاه و مستقیم به فارسی بده. درخواست: " + command.take(700),
                     org.json.JSONArray()
                 )
-                return backgroundLocalAi.generate(prompt, 64).replace(Regex("<think>[\s\\S]*?</think>"), "")
+                return backgroundLocalAi.generate(prompt, 64).replace(Regex("""<think>[\s\S]*?</think>"""), "")
                     .trim().ifBlank { "پاسخ خالی بود؛ دوباره بگو." }
             } catch (e: Exception) {
                 return "پاسخ محلی آماده نشد: " + (e.message ?: "خطای مدل")
