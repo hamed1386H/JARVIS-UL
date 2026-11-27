@@ -66,6 +66,7 @@ class WakeWordService : Service() {
             .setContentTitle(if (wakeDetected) "JARVIS صدایت را شنید" else "JARVIS فعال است")
             .setContentText(message)
             .setContentIntent(content)
+            .setFullScreenIntent(if (wakeDetected) content else null, wakeDetected)
             .setOngoing(!wakeDetected)
             .setAutoCancel(wakeDetected)
             .setOnlyAlertOnce(!wakeDetected)
@@ -284,12 +285,19 @@ class WakeWordService : Service() {
 
     private fun executeBackgroundPhoneAction(command: String): String? {
         val q = normalizeSpeech(command).replace(Regex("\\s+"), " ").trim()
-        val smsMatch = Regex("""به\s+(.+?)\s+(?:پیام\s*(?:بده|بفرست|ارسال\s*کن)|پیامک\s*(?:بده|بفرست|ارسال\s*کن)|اس\s*ام\s*اس\s*(?:بده|بفرست|ارسال\s*کن))""").find(q)
-        val callMatch = Regex("""^(?:لطفا\s+)?(?:به|با)\s+(.+?)\s+(?:زنگ\s+بزن|تماس\s+بگیر|تلفن\s+کن)$""").find(q)
+        val simSlot = when {
+            Regex("""(?:سیم ?کارت|سیم)\\s*(?:یک|اول|۱|1)""").containsMatchIn(q) -> 0
+            Regex("""(?:سیم ?کارت|سیم)\\s*(?:دو|دوم|۲|2)""").containsMatchIn(q) -> 1
+            else -> null
+        }
+        val cleanCommand = q.replace(Regex("""(?:با\\s*)?(?:سیم ?کارت|سیم)\\s*(?:یک|اول|۱|1|دو|دوم|۲|2)"""), " ")
+            .replace(Regex("""\\s+"""), " ").trim()
+        val smsMatch = Regex("""به\s+(.+?)\s+(?:پیام\s*(?:بده|بفرست|ارسال\s*کن)|پیامک\s*(?:بده|بفرست|ارسال\s*کن)|اس\s*ام\s*اس\s*(?:بده|بفرست|ارسال\s*کن))""").find(cleanCommand)
+        val callMatch = Regex("""^(?:لطفا\s+)?(?:به|با)\s+(.+?)\s+(?:زنگ\s+بزن|تماس\s+بگیر|تلفن\s+کن)$""").find(cleanCommand)
         val isSms = smsMatch != null
         val recipient = (smsMatch?.groupValues?.get(1) ?: callMatch?.groupValues?.get(1))?.trim() ?: return null
         val body = if (isSms) Regex("""(?:و\s*)?(?:بنویس|متن(?:ش)?(?:\s+این)?(?:\s+باشه)?|بگو|بفرست)\s*[:：،,-]*\s*(.+)$""")
-            .find(q)?.groupValues?.get(1)?.trim().orEmpty() else ""
+            .find(cleanCommand)?.groupValues?.get(1)?.trim().orEmpty() else ""
         if (isSms && body.isBlank()) return "متن پیام مشخص نیست؛ بگو: به نام مخاطب پیام بده، بنویس متن پیام."
         val required = if (isSms) android.Manifest.permission.SEND_SMS else android.Manifest.permission.CALL_PHONE
         if (checkSelfPermission(required) != PackageManager.PERMISSION_GRANTED ||
@@ -332,12 +340,15 @@ class WakeWordService : Service() {
             if (!isSms) {
                 val call = Intent(Intent.ACTION_CALL, Uri.fromParts("tel", match.number, null))
                     .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                if (simSlot != null) {
+                    val account = phoneAccountForSlot(simSlot)
+                        ?: return "سیم‌کارت " + (simSlot + 1) + " برای تماس شناسایی نشد؛ تماس برقرار نشد."
+                    call.putExtra(TelecomManager.EXTRA_PHONE_ACCOUNT_HANDLE, account)
+                }
                 startActivity(call)
-                "درخواست تماس با " + match.name + " به سرویس تماس گوشی سپرده شد."
+                "در حال تماس با " + match.name + (simSlot?.let { " با سیم‌کارت " + (it + 1) } ?: "")
             } else {
-                val sms = if (android.os.Build.VERSION.SDK_INT >= 31) {
-                    getSystemService(SmsManager::class.java) ?: SmsManager.getDefault()
-                } else SmsManager.getDefault()
+                val sms = smsManagerForSlot(simSlot)
                 val parts = sms.divideMessage(body)
                 val batchId = System.currentTimeMillis()
                 val callbacks = ArrayList<android.app.PendingIntent>()
@@ -360,6 +371,31 @@ class WakeWordService : Service() {
         } catch (e: Exception) {
             "اجرای فرمان برای " + match.name + " ناموفق بود: " + (e.message ?: "خطای گوشی")
         }
+    }
+
+    private fun activeSubscriptionId(slot: Int): Int? {
+        if (Build.VERSION.SDK_INT < 22 || checkSelfPermission(android.Manifest.permission.READ_PHONE_STATE) != PackageManager.PERMISSION_GRANTED) return null
+        return try {
+            val manager = getSystemService(android.telephony.SubscriptionManager::class.java) ?: return null
+            manager.activeSubscriptionInfoList?.firstOrNull { it.simSlotIndex == slot }?.subscriptionId
+        } catch (_: Exception) { null }
+    }
+
+    private fun smsManagerForSlot(slot: Int?): SmsManager {
+        if (slot == null || Build.VERSION.SDK_INT < 22) {
+            return if (Build.VERSION.SDK_INT >= 31) getSystemService(SmsManager::class.java) ?: SmsManager.getDefault() else SmsManager.getDefault()
+        }
+        val subId = activeSubscriptionId(slot) ?: throw IllegalStateException("سیم‌کارت ${slot + 1} فعال یا قابل دسترسی نیست")
+        return SmsManager.getSmsManagerForSubscriptionId(subId)
+    }
+
+    private fun phoneAccountForSlot(slot: Int): android.telecom.PhoneAccountHandle? {
+        if (checkSelfPermission(android.Manifest.permission.READ_PHONE_STATE) != PackageManager.PERMISSION_GRANTED) return null
+        val subId = activeSubscriptionId(slot) ?: return null
+        return try {
+            val telecom = getSystemService(TelecomManager::class.java) ?: return null
+            telecom.callCapablePhoneAccounts.firstOrNull { it.id == subId.toString() || it.id.contains(subId.toString()) }
+        } catch (_: Exception) { null }
     }
 
     private fun speakWithMicPaused(recorder: AudioRecord, message: String) {
@@ -427,6 +463,10 @@ class WakeWordService : Service() {
 
     private fun normalizeSpeech(value: String): String = value.lowercase()
         .replace("ي", "ی").replace("ك", "ک")
+        .replace('٠','0').replace('١','1').replace('٢','2').replace('٣','3').replace('٤','4')
+        .replace('٥','5').replace('٦','6').replace('٧','7').replace('٨','8').replace('٩','9')
+        .replace('۰','0').replace('۱','1').replace('۲','2').replace('۳','3').replace('۴','4')
+        .replace('۵','5').replace('۶','6').replace('۷','7').replace('۸','8').replace('۹','9')
         .replace("‌", " ").replace(Regex("\\s+"), " ").trim()
 
     private fun answerInBackground(command: String): String {
