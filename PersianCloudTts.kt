@@ -43,20 +43,22 @@ class PersianCloudTts(context: Context) {
                 .put("text", safeText)
                 .put("model_id", "eleven_v3")
                 .put("language_code", "fa")
-                .put("voice_settings", JSONObject().put("stability", 0.68).put("similarity_boost", 0.82).put("style", 0.35).put("speed", 0.92).put("use_speaker_boost", true))
+                .put("voice_settings", JSONObject().put("stability", 0.55))
                 .toString()
             connection.outputStream.use { it.write(body.toByteArray(Charsets.UTF_8)) }
             val code = connection.responseCode
             if (code !in 200..299) {
                 val detail = connection.errorStream?.bufferedReader(Charsets.UTF_8)?.use { it.readText() }.orEmpty()
-                val message = try { JSONObject(detail).optJSONObject("detail")?.optString("message") } catch (_: Exception) { null }
+                val detailObject = try { JSONObject(detail).optJSONObject("detail") } catch (_: Exception) { null }
+                val message = detailObject?.optString("message")?.takeIf { it.isNotBlank() }
+                val errorCode = detailObject?.optString("code")?.takeIf { it.isNotBlank() }
                 val safeError = when (code) {
                     401 -> "کلید سرویس صدا نامعتبر است؛ کلید ElevenLabs را در تنظیمات بررسی کن."
                     403 -> "دسترسی سرویس صدا رد شد (403). احتمالاً کلید یا سطح دسترسی حساب اجازه ساخت صدا نمی‌دهد؛ کلید را بررسی کن."
                     429 -> "سهمیه یا محدودیت درخواست سرویس صدا تمام شده؛ کمی بعد دوباره تلاش کن."
                     else -> "سرویس صدای فارسی پاسخ مناسبی نداد (کد $code)."
                 }
-                throw IllegalStateException(safeError)
+                throw IllegalStateException(if (message != null) "$safeError ($errorCode: $message)" else safeError)
             }
             val file = File.createTempFile("jarvis-fa-", ".mp3")
             connection.inputStream.use { input -> file.outputStream().buffered(65536).use { output -> input.copyTo(output) } }
