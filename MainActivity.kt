@@ -60,6 +60,7 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
     private var selectedTtsEnginePackage = ""
     private var ttsFallbackAttempted = false
     @Volatile private var pendingSpeech: String? = null
+    @Volatile private var cloudSpeechPending = false
     private var wakeMode = false
     @Volatile private var voiceSessionActive = false
     private var voiceDialog: AlertDialog? = null
@@ -966,6 +967,7 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
                                 addConversationMessage("user", text)
                             }
                             handleCommand(text)
+                            if (voiceSessionActive) resumeVoiceAfterCommand()
                         } else {
                             if (voiceSessionActive) {
                                 setJarvisMode(JarvisOrbView.Mode.IDLE)
@@ -1614,16 +1616,25 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
     }
 
     private fun parseCallRequest(raw: String): String? {
-        // Strip wake words/fillers and punctuation commonly inserted by Persian speech recognition.
-        val q = normalize(raw).replace(Regex("[،,؛;.!؟?]+"), " ")
-            .replace(Regex("\\s+"), " ").trim()
-            .replace(Regex("^(جارویس|هی جارویس|لطفا|لطفاً|خواهشا|خواهشاً)\\s+"), "")
+        // Normalize Persian ASR punctuation, wake words and polite suffixes before parsing.
+        val q = normalize(raw)
+            .replace(Regex("[،,؛;.!؟?]+"), " ")
+            .replace(Regex("\\s+"), " ")
+            .trim()
+            .replace(Regex("^(?:(?:هی|سلام)\\s+)?جارویس[\\s،,:-]*"), "")
+            .replace(Regex("^(?:لطفا|لطفاً|خواهشا|خواهشاً)\\s+"), "")
+            .replace(Regex("\\s+(?:لطفا|لطفاً|خواهشا|خواهشاً)$"), "")
+            .trim()
+        // IMPORTANT: Kotlin raw strings need a single backslash for regex tokens such as \\s.
         val patterns = listOf(
-            Regex("""^(?:لطفا\\s+)?(?:به|با)\\s+(.+?)\\s+(?:زنگ\\s*(?:بزن|بزنید)|تماس\\s*(?:بگیر|بگیرید)|تلفن\\s*کن)$"""),
-            Regex("""^(?:لطفا\\s+)?(.+?)\\s+(?:رو|را)?\\s*(?:تماس\\s*بگیر|زنگ\\s*بزن)$"""),
-            Regex("""^(?:با|به)\\s+(.+?)\\s+(?:تماس\\s*بگیر|زنگ\\s*بزن)$""")
+            Regex("""^(?:به|با)\\s+(.+?)\\s+(?:(?:رو|را)\\s+)?(?:زنگ\\s+بزن(?:ید)?|تماس\\s+بگیر(?:ید)?|تلفن\\s+کن(?:ید)?)$"""),
+            Regex("""^(.+?)\\s+(?:رو|را)\\s+(?:تماس\\s+بگیر(?:ید)?|زنگ\\s+بزن(?:ید)?)$"""),
+            Regex("""^(.+?)\\s+(?:تماس\\s+بگیر(?:ید)?|زنگ\\s+بزن(?:ید)?)$""")
         )
-        return patterns.firstNotNullOfOrNull { it.find(q)?.groupValues?.get(1)?.trim()?.takeIf { name -> name.isNotBlank() } }
+        return patterns.firstNotNullOfOrNull { pattern ->
+            pattern.find(q)?.groupValues?.get(1)?.trim()?.trim('،', ',', '.', '!')
+                ?.takeIf { it.isNotBlank() && it.length <= 60 }
+        }
     }
 
     private fun beginContactAction(recipient: String, body: String, action: String) {
@@ -2356,7 +2367,21 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
 
     private fun reply(message: String) { status.text = message; addLog("JARVIS", message); speak(message) }
     private fun isJarvisSpeaking(): Boolean {
-        return try { (::tts.isInitialized && tts.isSpeaking) || (cloudPlayer?.isPlaying == true) } catch (_: Exception) { false }
+        return cloudSpeechPending || try { (::tts.isInitialized && tts.isSpeaking) || (cloudPlayer?.isPlaying == true) } catch (_: Exception) { false }
+    }
+
+    // After each completed user utterance, execute the command first and then reopen
+    // recognition automatically. If JARVIS is speaking, wait until speech is finished.
+    private fun resumeVoiceAfterCommand() {
+        if (!voiceSessionActive || !activityVisible || isFinishing) return
+        speechWatchdog.postDelayed({
+            if (!voiceSessionActive || !activityVisible || isFinishing) return@postDelayed
+            if (isJarvisSpeaking() || pendingSpeech != null) {
+                resumeVoiceAfterCommand()
+            } else if (!androidRecognitionActive && !voiceCaptureActive.get()) {
+                beginListening()
+            }
+        }, 900L)
     }
 
     private fun armSpeechWatchdog() {
@@ -2406,6 +2431,7 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
         setJarvisMode(JarvisOrbView.Mode.SPEAKING)
         status.text = "در حال ساخت صدای فارسی JARVIS…"
         armSpeechWatchdog()
+        cloudSpeechPending = true
         speechExecutor.execute {
             try {
                 val audioFile = cloudTts.synthesize(message)
@@ -2417,11 +2443,13 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
                             setOnPreparedListener { player -> status.text = "JARVIS در حال صحبت است…"; player.start() }
                             setOnCompletionListener { player ->
                                 player.release(); cloudPlayer = null
+                                cloudSpeechPending = false
                                 finishSpeechTurn()
                                 try { audioFile.delete() } catch (_: Exception) {}
                             }
                             setOnErrorListener { player, _, _ ->
                                 player.release(); cloudPlayer = null
+                                cloudSpeechPending = false
                                 status.text = "پخش صدای فارسی ناموفق بود."
                                 finishSpeechTurn()
                                 try { audioFile.delete() } catch (_: Exception) {}
@@ -2431,12 +2459,14 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
                         }
                     } catch (e: Exception) {
                         cloudPlayer?.release(); cloudPlayer = null
+                        cloudSpeechPending = false
                         status.text = "پخش صدای فارسی ناموفق بود: ${e.message ?: "خطا"}"
                         finishSpeechTurn()
                     }
                 }
             } catch (e: Exception) {
                 runOnUiThread {
+                    cloudSpeechPending = false
                     if (ttsReady) {
                         status.text = "صدای آنلاین پاسخ نداد؛ از صدای گوشی استفاده می‌کنم."
                         speak(message)
