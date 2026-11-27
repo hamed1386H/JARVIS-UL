@@ -23,7 +23,7 @@ class PersianCloudTts(context: Context) {
 
     fun synthesize(text: String): File {
         require(isConfigured()) { "کلید و شناسه صدای ElevenLabs تنظیم نشده است." }
-        val safeText = text.trim().take(2400)
+        val safeText = "[Low, steady voice, calm, precise and measured delivery; neutral standard Iranian Persian pronunciation, without regional accent] " + text.trim().take(2250)
         require(safeText.isNotBlank()) { "متن برای گفتار خالی است." }
         val voice = voiceId()
         require(voice.matches(Regex("[A-Za-z0-9_-]{8,80}"))) { "شناسه Voice ID معتبر نیست." }
@@ -43,7 +43,7 @@ class PersianCloudTts(context: Context) {
                 .put("text", safeText)
                 .put("model_id", "eleven_v3")
                 .put("language_code", "fa")
-                .put("voice_settings", JSONObject().put("stability", 0.55))
+                .put("voice_settings", JSONObject().put("stability", 0.68))
                 .toString()
             connection.outputStream.use { it.write(body.toByteArray(Charsets.UTF_8)) }
             val code = connection.responseCode
