@@ -21,6 +21,7 @@ import kotlin.math.sqrt
 
 /** Local-only wake listener. Uses short overlapping windows and voice-activity gating. */
 // Build includes the SIM permission and wake full-screen behavior.
+// Rebuild after correcting SIM-slot phrase normalization.
 class WakeWordService : Service() {
     private val running = AtomicBoolean(false)
     private var worker: Thread? = null
