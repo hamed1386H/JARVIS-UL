@@ -225,7 +225,7 @@ class WakeWordService : Service() {
             try { recorder?.stop() } catch (_: Exception) {}
             try { recorder?.release() } catch (_: Exception) {}
             try { engine.unload() } catch (_: Exception) {}
-            try { backgroundLocalAi.unload(); backgroundLocalAiLoaded.set(false) } catch (_: Exception) {}
+            // Keep the on-device chat model loaded across wake-loop retries for immediate fallback.
         }
     }
 
@@ -587,13 +587,72 @@ class WakeWordService : Service() {
         }
     }
 
-    private fun normalizeSpeech(value: String): String = value.lowercase()
-        .replace("ي", "ی").replace("ك", "ک")
-        .replace('٠','0').replace('١','1').replace('٢','2').replace('٣','3').replace('٤','4')
-        .replace('٥','5').replace('٦','6').replace('٧','7').replace('٨','8').replace('٩','9')
-        .replace('۰','0').replace('۱','1').replace('۲','2').replace('۳','3').replace('۴','4')
-        .replace('۵','5').replace('۶','6').replace('۷','7').replace('۸','8').replace('۹','9')
-        .replace("‌", " ").replace(Regex("\\s+"), " ").trim()
+    private fun normalizeSpeech(value: String): String {
+        val normalized = value.lowercase()
+            .replace("ي", "ی").replace("ك", "ک")
+            .replace('٠','0').replace('١','1').replace('٢','2').replace('٣','3').replace('٤','4')
+            .replace('٥','5').replace('٦','6').replace('٧','7').replace('٨','8').replace('٩','9')
+            .replace('۰','0').replace('۱','1').replace('۲','2').replace('۳','3').replace('۴','4')
+            .replace('۵','5').replace('۶','6').replace('۷','7').replace('۸','8').replace('۹','9')
+            .replace("‌", " ").replace(Regex("[\\u064B-\\u065F\\u0670]"), "")
+            .replace(Regex("\\s+"), " ").trim()
+        val words = listOf("جارویس", "گزارش", "اشکال", "خطا", "تعمیر", "خودکار", "تنظیمات",
+            "چراغ", "فلش", "بلوتوث", "تماس", "بگیر", "پیامک", "بفرست", "روشن", "خاموش",
+            "باتری", "برنامه", "هواشناسی", "جستجو", "مخاطب", "اینترنت", "آنلاین", "محلی")
+        fun oneEdit(a: String, b: String): Boolean {
+            if (kotlin.math.abs(a.length - b.length) > 1 || a == b) return false
+            var i = 0; var j = 0; var edits = 0
+            while (i < a.length && j < b.length) {
+                if (a[i] == b[j]) { i++; j++; continue }
+                if (++edits > 1) return false
+                when {
+                    a.length == b.length -> { i++; j++ }
+                    a.length > b.length -> i++
+                    else -> j++
+                }
+            }
+            if (i < a.length || j < b.length) edits++
+            return edits == 1
+        }
+        return normalized.split(Regex("\\s+")).joinToString(" ") { token ->
+            if (token.length < 4 || token in words) token
+            else words.singleOrNull { oneEdit(token, it) } ?: token
+        }
+    }
+
+    private fun ensureBackgroundLocalAiLoaded(): Boolean {
+        if (backgroundLocalAiLoaded.get() && backgroundLocalAi.isLoaded()) return true
+        synchronized(backgroundLocalAi) {
+            if (backgroundLocalAiLoaded.get() && backgroundLocalAi.isLoaded()) return true
+            val prefs = getSharedPreferences("cht_ai", Context.MODE_PRIVATE)
+            if (!prefs.getBoolean("local_ai_enabled", true)) return false
+            val savedPath = prefs.getString("local_model_path", "") ?: ""
+            val base = getExternalFilesDir(Environment.DIRECTORY_DOWNLOADS) ?: File(filesDir, "models")
+            val model = if (savedPath.isNotBlank()) File(savedPath) else File(base, "Qwen_Qwen3-1.7B-Q4_K_M.gguf")
+            if (!model.isFile || model.length() !in (100L * 1024L * 1024L)..1_800_000_000L) {
+                logWakeEvent("local fallback model missing or outside supported size: " + model.absolutePath)
+                return false
+            }
+            try {
+                model.inputStream().use { stream ->
+                    val magic = ByteArray(4)
+                    check(stream.read(magic) == 4 && String(magic, Charsets.US_ASCII) == "GGUF") {
+                        "فایل مدل محلی فرمت GGUF ندارد."
+                    }
+                }
+                logWakeEvent("loading local fallback model: " + model.length() + " bytes")
+                updateNotification("اتصال آنلاین قطع شد؛ در حال آماده‌سازی هوش محلی")
+                backgroundLocalAi.load(model.absolutePath, 2, 1024)
+                backgroundLocalAiLoaded.set(true)
+                logWakeEvent("local fallback model loaded")
+                return true
+            } catch (e: Exception) {
+                backgroundLocalAiLoaded.set(false)
+                logWakeEvent("local fallback model load failed", e)
+                return false
+            }
+        }
+    }
 
     private fun answerInBackground(command: String): String {
         val agent = JarvisAgentCore(this)
@@ -609,22 +668,22 @@ class WakeWordService : Service() {
             }
         }
 
-        // Never cold-load the multi-gigabyte model in response to a wake-word command:
-        // this used to hold the microphone loop and delay the answer for minutes.
-        if (getSharedPreferences("cht_ai", Context.MODE_PRIVATE).getBoolean("local_ai_enabled", true) &&
-            backgroundLocalAiLoaded.get() && backgroundLocalAi.isLoaded()) {
+        // Load the installed GGUF model on the service worker when needed, then retain it
+        // for subsequent offline requests instead of silently returning an unavailable message.
+        if (ensureBackgroundLocalAiLoaded()) {
             try {
                 val prompt = agent.buildLocalPrompt(
                     "فقط پاسخ کوتاه و مستقیم به فارسی بده. درخواست: " + command.take(700),
                     org.json.JSONArray()
                 )
-                return backgroundLocalAi.generate(prompt, 64).replace(Regex("""<think>[\s\S]*?</think>"""), "")
-                    .trim().ifBlank { "پاسخ خالی بود؛ دوباره بگو." }
+                return backgroundLocalAi.generate(prompt, 96).replace(Regex("""<think>[\s\S]*?</think>"""), "")
+                    .trim().ifBlank { "مدل محلی پاسخ خالی داد؛ دوباره بگو." }
             } catch (e: Exception) {
+                logWakeEvent("local fallback generation failed", e)
                 return "پاسخ محلی آماده نشد: " + (e.message ?: "خطای مدل")
             }
         }
-        return "اتصال هوش آنلاین پاسخ نداد و مدل محلی در پس‌زمینه آماده نیست. اینترنت و کلید API را بررسی کن یا JARVIS را باز کن تا مدل محلی بارگذاری شود."
+        return "اتصال آنلاین پاسخ نداد و مدل محلی هم بارگذاری نشد. گزارش خطای مدل محلی ثبت شد؛ وجود فایل GGUF و فعال بودن هوش محلی را بررسی کن."
     }
 
     private fun showAnswerNotification(message: String, title: String = "پاسخ جارویس") {
@@ -664,6 +723,9 @@ class WakeWordService : Service() {
         try { worker?.interrupt() } catch (_: Exception) {}
         try { if (wakeLock?.isHeld == true) wakeLock?.release() } catch (_: Exception) {}
         wakeLock = null
+        try { backgroundLocalAi.unload(); backgroundLocalAiLoaded.set(false) } catch (e: Exception) {
+            logWakeEvent("local model release failed", e)
+        }
         logWakeEvent("service destroyed")
         super.onDestroy()
     }
