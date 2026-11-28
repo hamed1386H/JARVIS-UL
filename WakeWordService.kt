@@ -169,7 +169,7 @@ class WakeWordService : Service() {
                 if (hasWake && command.length < 2) {
                     showAnswerNotification("در خدمتم؛ فرمانت را بگو")
                     speakWithMicPaused(recorder, "در خدمتم")
-                    waitingForCommandUntil = System.currentTimeMillis() + 20000L
+                    waitingForCommandUntil = System.currentTimeMillis() + 8000L
                     updateNotification("در انتظار فرمان تو هستم")
                     continue
                 }
@@ -182,8 +182,9 @@ class WakeWordService : Service() {
 
                 waitingForCommandUntil = 0L
                 val actionResult = executeBackgroundPhoneAction(actualCommand)
-                val navigationResult = if (actionResult == null) executeBackgroundNavigation(actualCommand) else null
-                val answer = actionResult ?: navigationResult ?: answerInBackground(actualCommand)
+                val deviceResult = if (actionResult == null) executeBackgroundDeviceAction(actualCommand) else null
+                val navigationResult = if (actionResult == null && deviceResult == null) executeBackgroundNavigation(actualCommand) else null
+                val answer = actionResult ?: deviceResult ?: navigationResult ?: answerInBackground(actualCommand)
                 showAnswerNotification(answer)
                 speakWithMicPaused(recorder, answer.take(500))
                 updateNotification("گوش‌به‌زنگ فعال است؛ بگو " + configuredWakePhrase())
@@ -204,8 +205,10 @@ class WakeWordService : Service() {
         val samples = ArrayList<Short>(rate * 4)
         var started = false
         var quietChunks = 0
+        var speechChunks = 0
         var elapsedChunks = 0
-        val maxChunks = 50 // 10 seconds with 200 ms reads
+        var speechEnergy = 0.0
+        val maxChunks = 40 // At most 8 seconds; do not keep collecting room audio.
         while (running.get() && elapsedChunks < maxChunks) {
             val n = recorder.read(buffer, 0, buffer.size)
             if (n == AudioRecord.ERROR_INVALID_OPERATION || n == AudioRecord.ERROR_BAD_VALUE ||
@@ -218,16 +221,21 @@ class WakeWordService : Service() {
                 energy += value * value
             }
             val rms = sqrt(energy / n) / 32768.0
-            if (rms >= 0.0045) {
+            // A firmer gate plus multiple active chunks rejects brief clicks and low room noise.
+            if (rms >= 0.0070) {
                 started = true
                 quietChunks = 0
+                speechChunks++
+                speechEnergy += rms
             } else if (started) {
                 quietChunks++
             }
             if (started) for (i in 0 until n) samples.add(buffer[i])
             if (started && quietChunks >= 4) break
         }
-        if (!started || samples.size < rate / 4) return null
+        // Require at least ~600 ms of actual voice activity before sending audio to Whisper.
+        if (!started || speechChunks < 3 || speechEnergy / speechChunks < 0.0070 ||
+            samples.size < rate * 3 / 5) return null
         return FloatArray(samples.size) { samples[it].toFloat() / 32768f }
     }
 
@@ -238,6 +246,67 @@ class WakeWordService : Service() {
     }
 
 
+
+    /** Executes deterministic phone controls in standby instead of replying with text only. */
+    private fun executeBackgroundDeviceAction(command: String): String? {
+        val q = normalizeSpeech(command)
+            .replace(Regex("""\\s+"""), " ").trim()
+        if (q.contains("چراغ") || q.contains("فلش") || q.contains("فلاش")) {
+            val enable = !q.contains("خاموش")
+            return try {
+                val camera = getSystemService(Context.CAMERA_SERVICE) as android.hardware.camera2.CameraManager
+                val cameraId = camera.cameraIdList.firstOrNull { id ->
+                    camera.getCameraCharacteristics(id).get(
+                        android.hardware.camera2.CameraCharacteristics.FLASH_INFO_AVAILABLE
+                    ) == true
+                } ?: return "چراغ‌قوه روی این گوشی پیدا نشد."
+                camera.setTorchMode(cameraId, enable)
+                if (enable) "چراغ‌قوه روشن شد." else "چراغ‌قوه خاموش شد."
+            } catch (e: Exception) {
+                "تغییر چراغ‌قوه ممکن نشد؛ مجوز دوربین یا وضعیت فلش را بررسی کن."
+            }
+        }
+        if (q.contains("صدا") || q.contains("ولوم") || q.contains("بلندی")) {
+            return try {
+                val audio = getSystemService(Context.AUDIO_SERVICE) as android.media.AudioManager
+                val match = Regex("""([0-9]{1,3})""").find(q)?.value?.toIntOrNull()
+                if (match != null) {
+                    val max = audio.getStreamMaxVolume(android.media.AudioManager.STREAM_MUSIC)
+                    audio.setStreamVolume(android.media.AudioManager.STREAM_MUSIC,
+                        (max * match.coerceIn(0, 100) / 100.0).toInt(), 0)
+                    "صدای رسانه روی $match درصد تنظیم شد."
+                } else if (q.contains("کم")) {
+                    audio.adjustStreamVolume(android.media.AudioManager.STREAM_MUSIC,
+                        android.media.AudioManager.ADJUST_LOWER, 0)
+                    "صدای رسانه کم شد."
+                } else if (q.contains("زیاد") || q.contains("بیشتر")) {
+                    audio.adjustStreamVolume(android.media.AudioManager.STREAM_MUSIC,
+                        android.media.AudioManager.ADJUST_RAISE, 0)
+                    "صدای رسانه زیاد شد."
+                } else return "برای تنظیم صدا، درصد را هم بگو؛ مثلاً صدا را روی ۵۰ درصد بگذار."
+            } catch (_: Exception) { "تنظیم صدا انجام نشد." }
+        }
+        if (q.contains("وای فای") || q.contains("wifi")) {
+            return openBackgroundSettings(android.provider.Settings.ACTION_WIFI_SETTINGS, "تنظیمات وای‌فای باز شد.")
+        }
+        if (q.contains("بلوتوث")) {
+            return openBackgroundSettings(android.provider.Settings.ACTION_BLUETOOTH_SETTINGS, "تنظیمات بلوتوث باز شد.")
+        }
+        if (q.contains("باتری")) {
+            return openBackgroundSettings(android.provider.Settings.ACTION_BATTERY_SAVER_SETTINGS, "تنظیمات باتری باز شد.")
+        }
+        if (q.contains("تنظیمات")) {
+            return openBackgroundSettings(android.provider.Settings.ACTION_SETTINGS, "تنظیمات گوشی باز شد.")
+        }
+        return null
+    }
+
+    private fun openBackgroundSettings(action: String, success: String): String {
+        return try {
+            startActivity(Intent(action).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
+            success
+        } catch (_: Exception) { "باز کردن این تنظیمات ممکن نشد." }
+    }
 
     private fun executeBackgroundNavigation(command: String): String? {
         val q = normalizeSpeech(command).replace(Regex("""\s+"""), " ").trim()
