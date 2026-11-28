@@ -2720,7 +2720,7 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
         if (!::tts.isInitialized) { pendingSpeech = spokenMessage; return }
         if (!ttsReady) {
             if (cloudTts.isConfigured()) { speakCloud(spokenMessage); return }
-            pendingSpeech = message
+            pendingSpeech = spokenMessage
             if (::status.isInitialized) status.text = "صدای فارسی نصب نیست؛ از تنظیمات، صدای فارسی آنلاین را فعال کن."
             finishSpeechTurn()
             return
@@ -2734,7 +2734,7 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
             if (exact < TextToSpeech.LANG_AVAILABLE) tts.setLanguage(Locale("fa")) else exact
         } catch (_: Exception) { TextToSpeech.LANG_NOT_SUPPORTED }
         if (faResult < TextToSpeech.LANG_AVAILABLE) {
-            if (cloudTts.isConfigured()) speakCloud(message)
+            if (cloudTts.isConfigured()) speakCloud(spokenMessage)
             else {
                 pendingSpeech = null
                 status.text = "صدای فارسی گوشی در دسترس نیست؛ بسته گفتار فارسی را نصب کن."
