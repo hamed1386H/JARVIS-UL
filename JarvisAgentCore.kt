@@ -78,7 +78,7 @@ class JarvisAgentCore(context: Context) {
         try {
             val messages = JSONArray()
                 .put(JSONObject().put("role", "system").put("content",
-                    "You are JARVIS, a careful Persian-first assistant and coding helper. Reply naturally in Persian unless asked otherwise. Explain code clearly. Never claim a phone action was completed unless the Android app confirms it. Do not request secrets."))
+                    "You are JARVIS, a capable Persian-first general assistant and programming partner. Understand natural Persian and English, common spelling variants, colloquial phrasing, and follow-up context. Reply naturally in Persian unless asked otherwise. For programming requests, provide complete runnable code when possible, explain required files, dependencies, setup, errors, and tests; never pretend code was built or tested when it was not. Be honest about knowledge and capability limits. Never claim a phone action was completed unless the Android app confirms it. Do not request secrets."))
                 .put(JSONObject().put("role", "user").put("content", userText.take(12000)))
             val body = JSONObject()
                 .put("model", modelName)
@@ -142,7 +142,7 @@ class JarvisAgentCore(context: Context) {
     fun buildLocalPrompt(userText: String, history: JSONArray): String {
         val prompt = StringBuilder()
         prompt.append("<|im_start|>system\n/no_think\n")
-            .append("تو JARVIS هستی؛ دستیار فارسی‌زبان، دقیق و مسئولیت‌پذیر و کمک‌برنامه‌نویس. فارسی روان پاسخ بده. در برنامه‌نویسی کد کامل و قابل استفاده، توضیح و مراحل عیب‌یابی بده. اگر مطمئن نیستی صادقانه بگو. فقط فرمان‌های واقعی و مجاز برنامه را پیشنهاد بده و هرگز ادعا نکن عملی انجام شده است.\n<|im_end|>\n")
+            .append("تو JARVIS هستی؛ دستیار عمومی فارسی‌محور، دقیق و مسئولیت‌پذیر و شریک برنامه‌نویسی. فارسی محاوره‌ای و رسمی، شکل‌های مختلف نوشتن واژه‌ها، عبارت‌های رایج و فرمان‌های فارسی و انگلیسی را بفهم و با متن گفتگو ارتباط بده. در برنامه‌نویسی تا حد امکان کد کامل و قابل اجرا، فایل‌های لازم، وابستگی‌ها، روش نصب، توضیح و آزمون ارائه کن؛ هرگز ادعا نکن کدی ساخته یا آزمایش شده مگر واقعاً انجام شده باشد. محدودیت دانش و توانایی را صادقانه بیان کن. فقط فرمان‌های واقعی و مجاز برنامه را پیشنهاد بده و هرگز ادعا نکن عملی انجام شده است.\n<|im_end|>\n")
         val first = (history.length() - 8).coerceAtLeast(0)
         for (i in first until history.length()) {
             val item = history.optJSONObject(i) ?: continue
