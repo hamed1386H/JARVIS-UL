@@ -130,6 +130,12 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        // Persist uncaught app crashes before delegating to Android's normal crash handler.
+        val previousCrashHandler = Thread.getDefaultUncaughtExceptionHandler()
+        Thread.setDefaultUncaughtExceptionHandler { thread, error ->
+            recordJarvisError("uncaught:" + thread.name, error)
+            previousCrashHandler?.uncaughtException(thread, error)
+        }
         // Prefer Xiaomi's installed TTS engine silently; fall back to Google, then the system default.
         val ttsEngines = try {
             packageManager.queryIntentServices(Intent(TextToSpeech.Engine.INTENT_ACTION_TTS_SERVICE), 0)
