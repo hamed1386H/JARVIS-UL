@@ -208,18 +208,18 @@ class JarvisAgentCore(context: Context) {
             val safeName = fileName.replace(Regex("[^A-Za-z0-9._-]"), "_").take(80).ifBlank { "voice.m4a" }
             connection.outputStream.use { output ->
                 fun field(name: String, value: String) {
-                    output.write("--$boundary\\r\\n".toByteArray())
-                    output.write("Content-Disposition: form-data; name=\"$name\"\\r\\n\\r\\n".toByteArray())
+                    output.write("--$boundary\r\n".toByteArray())
+                    output.write("Content-Disposition: form-data; name=\"$name\"\r\n\r\n".toByteArray())
                     output.write(value.toByteArray(Charsets.UTF_8))
-                    output.write("\\r\\n".toByteArray())
+                    output.write("\r\n".toByteArray())
                 }
                 field("model", "whisper-large-v3-turbo")
                 field("language", "fa")
-                output.write("--$boundary\\r\\n".toByteArray())
-                output.write("Content-Disposition: form-data; name=\"file\"; filename=\"$safeName\"\\r\\n".toByteArray())
-                output.write("Content-Type: ${mimeType.ifBlank { "application/octet-stream" }}\\r\\n\\r\\n".toByteArray())
+                output.write("--$boundary\r\n".toByteArray())
+                output.write("Content-Disposition: form-data; name=\"file\"; filename=\"$safeName\"\r\n".toByteArray())
+                output.write("Content-Type: ${mimeType.ifBlank { "application/octet-stream" }}\r\n\r\n".toByteArray())
                 output.write(bytes)
-                output.write("\\r\\n--$boundary--\\r\\n".toByteArray())
+                output.write("\r\n--$boundary--\r\n".toByteArray())
             }
             val code = connection.responseCode
             val stream = if (code in 200..299) connection.inputStream else connection.errorStream
