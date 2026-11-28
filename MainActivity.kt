@@ -411,6 +411,13 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
             "ساخت و ارسال گزارش خطا به ChatGPT" to { shareJarvisDiagnosticReport() },
             "باز کردن مرکز مجوزها" to { showPermissionCenter() }
         ))
+        section("07  ·  APP AUTOMATION", "کنترل برنامه‌ها فقط پس از فعال‌سازی دستی سرویس دسترس‌پذیری اندروید", listOf(
+            "فعال‌سازی کنترل برنامه‌ها" to { showAccessibilityConsent() },
+            "وضعیت مجوز کنترل برنامه‌ها" to {
+                status.text = if (isAutomationEnabled()) "مجوز کنترل برنامه‌ها فعال است." else "مجوز کنترل برنامه‌ها هنوز فعال نشده است."
+            },
+            "باز کردن تنظیمات VPN" to { openVpnSettingsForUser() }
+        ))
         val modesCard = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             setPadding(dp(13), dp(12), dp(13), dp(12))
@@ -964,6 +971,7 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
         super.onResume()
         activityVisible = true
         updatePermissionStatus()
+        if (::status.isInitialized && isAutomationEnabled()) status.text = "کنترل برنامه‌ها آماده است."
         scanGrantedDownloadFolder()
         if (!wakeReceiverRegistered) {
             ContextCompat.registerReceiver(this, wakeDetectedReceiver,
@@ -1817,6 +1825,46 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
         }
     }
 
+    private fun isAutomationEnabled(): Boolean {
+        val enabled = Settings.Secure.getString(contentResolver, Settings.Secure.ENABLED_ACCESSIBILITY_SERVICES).orEmpty()
+        return enabled.split(':').any { entry ->
+            val component = android.content.ComponentName.unflattenFromString(entry)
+            component?.packageName == packageName && component.className.endsWith("JarvisAccessibilityService")
+        }
+    }
+
+    private fun showAccessibilityConsent() {
+        AlertDialog.Builder(this)
+            .setTitle("مجوز کنترل برنامه‌ها")
+            .setMessage("برای لمس دکمه‌ها و نوشتن متن در برنامه‌های دیگر، اندروید به سرویس دسترس‌پذیری JARVIS نیاز دارد. این مجوز قدرتمند است؛ JARVIS فقط فرمانی را که خودت می‌گویی اجرا می‌کند و محتوای صفحه یا رمزها را جمع‌آوری یا ارسال نمی‌کند. فعال‌سازی فقط با انتخاب خودت انجام می‌شود.")
+            .setPositiveButton("رفتن به تنظیمات") { _, _ ->
+                try { startActivity(Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS)) }
+                catch (_: Exception) { status.text = "بازکردن تنظیمات دسترس‌پذیری ممکن نشد." }
+            }
+            .setNegativeButton("فعلاً نه", null)
+            .show()
+    }
+
+    private fun sendAutomationCommand(action: String, value: String = ""): Boolean {
+        if (!isAutomationEnabled()) {
+            showAccessibilityConsent()
+            return false
+        }
+        val command = Intent(JarvisAccessibilityService.ACTION_AUTOMATE).setPackage(packageName)
+            .putExtra(JarvisAccessibilityService.EXTRA_ACTION, action)
+            .putExtra(JarvisAccessibilityService.EXTRA_VALUE, value)
+        return try { sendBroadcast(command); true } catch (_: Exception) { false }
+    }
+
+    private fun openVpnSettingsForUser() {
+        try {
+            startActivity(Intent(Settings.ACTION_VPN_SETTINGS))
+            status.text = "تنظیمات VPN باز شد؛ اتصال فیلترشکن را خودت تأیید کن."
+        } catch (_: Exception) {
+            status.text = "تنظیمات VPN در این نسخه اندروید در دسترس نیست."
+        }
+    }
+
     private fun handleCommand(raw: String) {
         val corrected = correctCommandTypos(raw)
         val q = normalize(corrected).trim()
@@ -1862,6 +1910,39 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
         if (smsRequest != null) { beginContactAction(smsRequest.first, smsRequest.second, "sms"); return }
         if (q.contains("پیام") || q.contains("پیامک") || q.contains("اس ام اس") || q.contains("sms")) {
             reply("برای انجام پیام، نام مخاطب و متن پیام را کامل بنویس یا بگو. مثال: به علی پیام بده سلام.")
+            return
+        }
+        val appAndText = Regex("""(?:برو تو|باز کن)\\s+(.+?)\\s+و\\s+(?:بنویس|تایپ کن)\\s+(.+)$""").find(corrected)
+        if (appAndText != null) {
+            val appName = appAndText.groupValues[1].trim()
+            val textToType = appAndText.groupValues[2].trim()
+            if (!isAutomationEnabled()) { showAccessibilityConsent(); return }
+            launchAppByName(appName)
+            speechWatchdog.postDelayed({
+                if (!isFinishing) sendAutomationCommand("type", textToType)
+            }, 2200L)
+            return
+        }
+        if (q.contains("فیلترشکن") || q.contains("وی پی ان") || q.contains("vpn")) {
+            openVpnSettingsForUser()
+            return
+        }
+        val tapMatch = Regex("""(?:روی|رو)\\s+(.+?)\\s+(?:بزن|کلیک کن)$""").find(q)
+        if (tapMatch != null) {
+            if (sendAutomationCommand("tap", tapMatch.groupValues[1].trim())) status.text = "درخواست لمس ارسال شد."
+            return
+        }
+        if (q.startsWith("بنویس ") || q.startsWith("تایپ کن ")) {
+            val textToType = q.removePrefix("بنویس ").removePrefix("تایپ کن ").trim()
+            if (sendAutomationCommand("type", textToType)) status.text = "درخواست نوشتن متن ارسال شد."
+            return
+        }
+        if (q == "برگرد" || q == "بازگشت" || q == "برگرد عقب") {
+            sendAutomationCommand("back")
+            return
+        }
+        if (q == "برو خانه" || q == "صفحه اصلی" || q == "برو صفحه اصلی") {
+            sendAutomationCommand("home")
             return
         }
         val requestedApp = extractAppLaunchTarget(q)
