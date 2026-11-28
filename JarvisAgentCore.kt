@@ -140,6 +140,100 @@ class JarvisAgentCore(context: Context) {
         }
     }
 
+    fun askOnlineImage(userText: String, jpegBase64: String): String {
+        require(jpegBase64.isNotBlank()) { "تصویر خالی است." }
+        require(isOnlineConfigured()) { "برای تحلیل تصویر، ابتدا اتصال هوش آنلاین را تنظیم کن." }
+        val target = normalizedEndpoint()
+        val host = URL(target).host
+        // Groq's default GPT-OSS model is text-only; use its documented vision model
+        // for image requests without changing the user's saved chat model.
+        val modelName = if (host.endsWith("groq.com", true) && model() == "openai/gpt-oss-20b")
+            "qwen/qwen3.8-27b" else model()
+        val connection = (URL(target).openConnection() as HttpURLConnection).apply {
+            requestMethod = "POST"
+            connectTimeout = 15000
+            readTimeout = 60000
+            doOutput = true
+            setRequestProperty("Content-Type", "application/json; charset=utf-8")
+            setRequestProperty("Accept", "application/json")
+            if (host.endsWith(".p.rapidapi.com", true)) {
+                setRequestProperty("X-RapidAPI-Key", apiKey().trim())
+                setRequestProperty("X-RapidAPI-Host", host)
+            } else setRequestProperty("Authorization", "Bearer ${apiKey().trim()}")
+        }
+        try {
+            val content = JSONArray()
+                .put(JSONObject().put("type", "text").put("text", userText.take(3000)))
+                .put(JSONObject().put("type", "image_url").put("image_url",
+                    JSONObject().put("url", "data:image/jpeg;base64,$jpegBase64")))
+            val messages = JSONArray().put(JSONObject().put("role", "user").put("content", content))
+            val body = JSONObject().put("model", modelName).put("messages", messages)
+                .put("temperature", 0.25).put("max_tokens", 600).toString()
+            connection.outputStream.use { it.write(body.toByteArray(Charsets.UTF_8)) }
+            val code = connection.responseCode
+            val stream = if (code in 200..299) connection.inputStream else connection.errorStream
+            val response = stream?.bufferedReader(Charsets.UTF_8)?.use { it.readText() }.orEmpty()
+            if (code !in 200..299) {
+                val detail = try { JSONObject(response).optJSONObject("error")?.optString("message") } catch (_: Exception) { null }
+                throw IllegalStateException("تحلیل تصویر از سرویس آنلاین ناموفق بود ($code): ${(detail ?: response).take(260)}")
+            }
+            val answer = JSONObject(response).optJSONArray("choices")?.optJSONObject(0)
+                ?.optJSONObject("message")?.optString("content").orEmpty().trim()
+            if (answer.isBlank()) throw IllegalStateException("مدل بینایی پاسخ متنی برنگرداند.")
+            return answer.take(10000)
+        } finally { connection.disconnect() }
+    }
+
+    fun transcribeAudio(bytes: ByteArray, mimeType: String, fileName: String): String {
+        require(bytes.isNotEmpty()) { "فایل صوتی خالی است." }
+        require(bytes.size <= 25 * 1024 * 1024) { "حجم فایل صوتی بیشتر از ۲۵ مگابایت است." }
+        require(isOnlineConfigured()) { "برای تبدیل ویس به متن، ابتدا اتصال هوش آنلاین را تنظیم کن." }
+        val base = normalizedEndpoint().removeSuffix("/chat/completions")
+        val target = URL("$base/audio/transcriptions")
+        val boundary = "JarvisBoundary${System.nanoTime()}"
+        val connection = (target.openConnection() as HttpURLConnection).apply {
+            requestMethod = "POST"
+            connectTimeout = 15000
+            readTimeout = 90000
+            doOutput = true
+            setRequestProperty("Content-Type", "multipart/form-data; boundary=$boundary")
+            setRequestProperty("Accept", "application/json")
+            val host = target.host
+            if (host.endsWith(".p.rapidapi.com", true)) {
+                setRequestProperty("X-RapidAPI-Key", apiKey().trim())
+                setRequestProperty("X-RapidAPI-Host", host)
+            } else setRequestProperty("Authorization", "Bearer ${apiKey().trim()}")
+        }
+        try {
+            val safeName = fileName.replace(Regex("[^A-Za-z0-9._-]"), "_").take(80).ifBlank { "voice.m4a" }
+            connection.outputStream.use { output ->
+                fun field(name: String, value: String) {
+                    output.write("--$boundary\\r\\n".toByteArray())
+                    output.write("Content-Disposition: form-data; name=\"$name\"\\r\\n\\r\\n".toByteArray())
+                    output.write(value.toByteArray(Charsets.UTF_8))
+                    output.write("\\r\\n".toByteArray())
+                }
+                field("model", "whisper-large-v3-turbo")
+                field("language", "fa")
+                output.write("--$boundary\\r\\n".toByteArray())
+                output.write("Content-Disposition: form-data; name=\"file\"; filename=\"$safeName\"\\r\\n".toByteArray())
+                output.write("Content-Type: ${mimeType.ifBlank { "application/octet-stream" }}\\r\\n\\r\\n".toByteArray())
+                output.write(bytes)
+                output.write("\\r\\n--$boundary--\\r\\n".toByteArray())
+            }
+            val code = connection.responseCode
+            val stream = if (code in 200..299) connection.inputStream else connection.errorStream
+            val response = stream?.bufferedReader(Charsets.UTF_8)?.use { it.readText() }.orEmpty()
+            if (code !in 200..299) {
+                val detail = try { JSONObject(response).optJSONObject("error")?.optString("message") } catch (_: Exception) { null }
+                throw IllegalStateException("تبدیل ویس ناموفق بود ($code): ${(detail ?: response).take(260)}")
+            }
+            val text = JSONObject(response).optString("text").trim()
+            if (text.isBlank()) throw IllegalStateException("متنی از فایل صوتی دریافت نشد.")
+            return text.take(12000)
+        } finally { connection.disconnect() }
+    }
+
     fun buildLocalPrompt(userText: String, history: JSONArray): String {
         val prompt = StringBuilder()
         prompt.append("<|im_start|>system\n/no_think\n")
