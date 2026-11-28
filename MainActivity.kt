@@ -394,6 +394,12 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
             "درباره JARVIS" to { showAboutJarvis() }
         ))
 
+        section("06  ·  SELF DIAGNOSTICS", "گزارش خطا، بررسی سلامت و بازیابی امن جارویس", listOf(
+            "بررسی کامل سلامت جارویس" to { showJarvisDiagnostics() },
+            "عیب‌یابی و تعمیر خودکار" to { diagnoseAndRepairJarvis() },
+            "ساخت و ارسال گزارش خطا به ChatGPT" to { shareJarvisDiagnosticReport() },
+            "باز کردن مرکز مجوزها" to { showPermissionCenter() }
+        ))
         val modesCard = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             setPadding(dp(13), dp(12), dp(13), dp(12))
@@ -404,7 +410,7 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
             elevation = dp(5).toFloat()
         }
         modesCard.addView(TextView(this).apply {
-            text = "06  ·  FEATURE SWITCHES"; textSize = 16f; typeface = Typeface.DEFAULT_BOLD
+            text = "07  ·  FEATURE SWITCHES"; textSize = 16f; typeface = Typeface.DEFAULT_BOLD
             setTextColor(Color.rgb(225, 243, 255))
         })
         modesCard.addView(TextView(this).apply {
@@ -509,6 +515,119 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
                 reply("فرمان بیدارباش به جارویس برگشت.")
             }
             .setNegativeButton("لغو", null).show()
+    }
+
+
+    // Local diagnostic log; private to this app and never uploaded automatically.
+    private fun recordJarvisError(source: String, error: Throwable) {
+        try {
+            val file = java.io.File(filesDir, "jarvis_diagnostics.log")
+            val stamp = java.text.SimpleDateFormat("yyyy-MM-dd HH:mm:ss", Locale.US).format(java.util.Date())
+            synchronized(this) {
+                file.appendText("\\n[" + stamp + "] " + source + ": " + error.javaClass.simpleName + ": " + error.message + "\\n" + android.util.Log.getStackTraceString(error).take(12000) + "\\n")
+                if (file.length() > 512000L) file.writeText(file.readText().takeLast(256000))
+            }
+        } catch (_: Exception) {}
+    }
+
+    private fun diagnosticReport(): String {
+        fun granted(permission: String) = ContextCompat.checkSelfPermission(this, permission) == PackageManager.PERMISSION_GRANTED
+        val pm = getSystemService(Context.POWER_SERVICE) as android.os.PowerManager
+        val nm = getSystemService(Context.NOTIFICATION_SERVICE) as android.app.NotificationManager
+        val whisperOk = whisperModelFile.isFile && whisperModelFile.length() > 15000000L
+        val localOk = isValidGguf(localModelFile, 100000000L)
+        val faVoice = try { tts.voices?.any { it.locale.language == "fa" } == true } catch (_: Exception) { false }
+        val version = try { packageManager.getPackageInfo(packageName, 0).versionName ?: "unknown" } catch (_: Exception) { "unknown" }
+        val logFile = java.io.File(filesDir, "jarvis_diagnostics.log")
+        return buildString {
+            appendLine("JARVIS diagnostic report")
+            appendLine("Version: " + version)
+            appendLine("Device: " + android.os.Build.MANUFACTURER + " " + android.os.Build.MODEL + " / Android " + android.os.Build.VERSION.RELEASE)
+            appendLine("Microphone: " + granted(Manifest.permission.RECORD_AUDIO))
+            appendLine("Notifications: " + (android.os.Build.VERSION.SDK_INT < 33 || granted(Manifest.permission.POST_NOTIFICATIONS)))
+            appendLine("Contacts: " + granted(Manifest.permission.READ_CONTACTS))
+            appendLine("Phone: " + granted(Manifest.permission.CALL_PHONE))
+            appendLine("SMS: " + granted(Manifest.permission.SEND_SMS))
+            appendLine("Modify system settings: " + Settings.System.canWrite(this@MainActivity))
+            appendLine("DND access: " + nm.isNotificationPolicyAccessGranted)
+            appendLine("Battery unrestricted: " + pm.isIgnoringBatteryOptimizations(packageName))
+            appendLine("Wake service running: " + isWakeServiceRunning())
+            appendLine("Wake mode preference: " + prefs.getBoolean("wake_mode_enabled", false))
+            appendLine("Whisper model valid: " + whisperOk + " / bytes=" + whisperModelFile.length())
+            appendLine("Local GGUF model valid: " + localOk + " / bytes=" + localModelFile.length())
+            appendLine("TTS ready: " + ttsReady + " / Persian local voice: " + faVoice)
+            appendLine("Persian cloud voice configured: " + cloudTts.isConfigured())
+            appendLine("Local AI loaded: " + localAi.isLoaded())
+            appendLine()
+            appendLine("Recent logged errors:")
+            appendLine(if (logFile.isFile) logFile.readText().takeLast(18000) else "No logged errors.")
+            appendLine()
+            appendLine("Privacy: shared only when the user chooses an app in Android's share sheet.")
+        }
+    }
+
+    private fun showJarvisDiagnostics() {
+        val report = try { diagnosticReport() } catch (e: Exception) {
+            recordJarvisError("diagnostic_report", e)
+            "گزارش‌گیری با خطا روبه‌رو شد: " + (e.message ?: "خطای ناشناخته")
+        }
+        val view = ScrollView(this).apply {
+            addView(TextView(this@MainActivity).apply {
+                text = report
+                textSize = 12f
+                setTextColor(Color.WHITE)
+                setPadding(dp(16), dp(12), dp(16), dp(12))
+                textDirection = View.TEXT_DIRECTION_FIRST_STRONG_LTR
+            })
+        }
+        AlertDialog.Builder(this).setTitle("سلامت و عیب‌یابی JARVIS")
+            .setView(view)
+            .setPositiveButton("ارسال گزارش") { _, _ -> shareJarvisDiagnosticReport() }
+            .setNeutralButton("تعمیر خودکار") { _, _ -> diagnoseAndRepairJarvis() }
+            .setNegativeButton("بستن", null).show()
+    }
+
+    private fun shareJarvisDiagnosticReport() {
+        try {
+            val send = Intent(Intent.ACTION_SEND).apply {
+                type = "text/plain"
+                putExtra(Intent.EXTRA_SUBJECT, "گزارش عیب‌یابی JARVIS")
+                putExtra(Intent.EXTRA_TEXT, diagnosticReport())
+            }
+            startActivity(Intent.createChooser(send, "گزارش را با ChatGPT یا برنامه دلخواه به اشتراک بگذار"))
+        } catch (e: Exception) {
+            recordJarvisError("share_diagnostic_report", e)
+            Toast.makeText(this, "اشتراک‌گذاری گزارش ممکن نشد.", Toast.LENGTH_LONG).show()
+        }
+    }
+
+    private fun diagnoseAndRepairJarvis() {
+        try {
+            val missingMic = ContextCompat.checkSelfPermission(this, Manifest.permission.RECORD_AUDIO) != PackageManager.PERMISSION_GRANTED
+            val missingNotice = android.os.Build.VERSION.SDK_INT >= 33 && ContextCompat.checkSelfPermission(this, Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED
+            if (missingMic || missingNotice) {
+                showPermissionCenter()
+                reply("برای تعمیر کامل، مجوز میکروفون و اعلان را از صفحه اندروید تأیید کن.")
+                return
+            }
+            if (prefs.getBoolean("wake_mode_enabled", false) && whisperModelFile.isFile && whisperModelFile.length() > 15000000L) {
+                stopService(Intent(this, WakeWordService::class.java))
+                window.decorView.postDelayed({ startWakeServiceNow() }, 700)
+            }
+            if (!localAi.isLoaded() && isValidGguf(localModelFile, 100000000L)) autoLoadLocalModel()
+            if (!whisperModelFile.isFile || whisperModelFile.length() <= 15000000L) {
+                AlertDialog.Builder(this).setTitle("مدل گفتار نصب نیست")
+                    .setMessage("برای فعال شدن گوش‌به‌زنگ، مدل Whisper را از تنظیمات جارویس دانلود کن.")
+                    .setPositiveButton("تنظیمات جارویس") { _, _ -> openJarvisSettingsSafely() }
+                    .setNegativeButton("بستن", null).show()
+            } else {
+                reply("بررسی انجام شد و سرویس‌های داخلی جارویس برای بازیابی دوباره راه‌اندازی شدند.")
+                showJarvisDiagnostics()
+            }
+        } catch (e: Exception) {
+            recordJarvisError("self_repair", e)
+            reply("تعمیر خودکار کامل نشد؛ خطا در گزارش داخلی ثبت شد.")
+        }
     }
 
     private fun showAboutJarvis() {
@@ -1541,6 +1660,18 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
         if (q == "جارویس" || q == "هی جارویس" || q == "سلام جارویس" || q == "بیدار شو" || q == "بیدار" ||
             q == "جارویس بیدار شو" || q == "جارویس گوش کن") {
             reply("در خدمتم")
+            return
+        }
+        if (q.contains("عیب یابی") || q.contains("عیب‌یابی") || q.contains("گزارش خطا") || q.contains("سلامت جارویس")) {
+            showJarvisDiagnostics()
+            return
+        }
+        if (q.contains("تعمیر خودکار") || q.contains("خودت رو تعمیر کن") || q.contains("خودت را تعمیر کن")) {
+            diagnoseAndRepairJarvis()
+            return
+        }
+        if (q.contains("ارسال گزارش") || q.contains("گزارشت رو بفرست") || q.contains("گزارش خودت")) {
+            shareJarvisDiagnosticReport()
             return
         }
         if (q.contains("تنظیمات جارویس") || q.contains("تنظیمات خودت") || q.contains("تنظیمات داخلی") || q == "تنظیمات دستیار") {
