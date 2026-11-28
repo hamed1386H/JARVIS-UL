@@ -56,6 +56,7 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
     private var cloudPlayer: android.media.MediaPlayer? = null
     private var speechRecognizer: SpeechRecognizer? = null
     @Volatile private var androidRecognitionActive = false
+    @Volatile private var androidRecognitionStartedAtMs = 0L
     private var ttsReady = false
     private var selectedTtsEnginePackage = ""
     private var ttsFallbackAttempted = false
@@ -1066,8 +1067,27 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
             ActivityCompat.requestPermissions(this, arrayOf(Manifest.permission.RECORD_AUDIO), requestMic)
             return
         }
-        if (androidRecognitionActive || voiceCaptureActive.get()) {
-            if (!voiceSessionActive) status.text = "در حال شنیدن یا تبدیل گفتار هستم؛ کمی صبر کن…"
+        if (androidRecognitionActive) {
+            // Recover from Android speech services that never deliver onResults/onError.
+            val elapsed = android.os.SystemClock.elapsedRealtime() - androidRecognitionStartedAtMs
+            if (androidRecognitionStartedAtMs > 0L && elapsed > 25000L) {
+                androidRecognitionActive = false
+                destroySpeechRecognizer()
+                if (::status.isInitialized) status.text = "سرویس تشخیص گفتار متوقف شده بود؛ دوباره تلاش می‌کنم…"
+            } else {
+                if (!voiceSessionActive) status.text = "در حال گوش‌دادن؛ لطفاً صحبتت را تمام کن…"
+                speechWatchdog.postDelayed({
+                    if (activityVisible && !isFinishing && !isJarvisSpeaking() && !voiceCaptureActive.get()) beginListening()
+                }, 1200L)
+                return
+            }
+        }
+        if (voiceCaptureActive.get()) {
+            if (!voiceSessionActive) status.text = "صدای قبلی هنوز در حال پردازش است؛ کمی صبر کن…"
+            speechWatchdog.postDelayed({
+                if (activityVisible && !isFinishing && !voiceCaptureActive.get() &&
+                    !androidRecognitionActive && !isJarvisSpeaking()) beginListening()
+            }, 1200L)
             return
         }
         // Prefer Android's Persian speech service for a fast response. Whisper remains the offline fallback.
@@ -1100,6 +1120,7 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
             } else SpeechRecognizer.createSpeechRecognizer(this)
             speechRecognizer = recognizer
             androidRecognitionActive = true
+            androidRecognitionStartedAtMs = android.os.SystemClock.elapsedRealtime()
             setJarvisMode(JarvisOrbView.Mode.LISTENING)
             if (!voiceSessionActive) status.text = "در حال گوش‌دادن؛ فارسی صحبت کن…"
             recognizer.setRecognitionListener(object : RecognitionListener {
@@ -1126,6 +1147,7 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
                     runOnUiThread {
                         if (!androidRecognitionActive || isFinishing) return@runOnUiThread
                         androidRecognitionActive = false
+                        androidRecognitionStartedAtMs = 0L
                         destroySpeechRecognizer()
                         if (voiceSessionActive) {
                             // In live conversation, recover the Android recognizer directly.
@@ -1196,6 +1218,8 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
     private fun destroySpeechRecognizer() {
         try { speechRecognizer?.cancel() } catch (_: Exception) {}
         try { speechRecognizer?.destroy() } catch (_: Exception) {}
+        androidRecognitionActive = false
+        androidRecognitionStartedAtMs = 0L
         speechRecognizer = null
         if (::orbView.isInitialized) orbView.setAudioLevel(0f)
     }
