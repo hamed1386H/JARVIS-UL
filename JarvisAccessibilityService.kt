@@ -23,6 +23,10 @@ class JarvisAccessibilityService : AccessibilityService() {
             val action = intent.getStringExtra(EXTRA_ACTION).orEmpty()
             val value = intent.getStringExtra(EXTRA_VALUE).orEmpty()
             val ok = try { execute(action, value) } catch (_: Exception) { false }
+            getSharedPreferences("cht_ai", Context.MODE_PRIVATE).edit()
+                .putString("last_automation_result", if (ok) "success" else "failure")
+                .putLong("last_automation_result_at", System.currentTimeMillis())
+                .apply()
             sendBroadcast(Intent(ACTION_RESULT).setPackage(packageName)
                 .putExtra(EXTRA_ACTION, action)
                 .putExtra(EXTRA_SUCCESS, ok))
