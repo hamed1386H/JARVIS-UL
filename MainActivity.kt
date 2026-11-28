@@ -2703,10 +2703,23 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
         speechWatchdog.postDelayed(task, 35000L)
     }
 
+    // Remove accidental English conversational fillers before speech playback.
+    private fun normalizeJarvisSpeech(raw: String): String {
+        var value = raw.trim()
+        val opening = Regex("(?i)^(?:sure|okay|ok|hello|hi there|hi|certainly|of course|well|so)[!,.،:؛\\s-]+")
+        repeat(2) {
+            val cleaned = opening.replaceFirst(value, "").trimStart()
+            if (cleaned != value) value = cleaned
+        }
+        return value
+    }
+
     private fun speak(message: String) {
-        if (!::tts.isInitialized) { pendingSpeech = message; return }
+        val spokenMessage = normalizeJarvisSpeech(message)
+        if (spokenMessage.isBlank()) return
+        if (!::tts.isInitialized) { pendingSpeech = spokenMessage; return }
         if (!ttsReady) {
-            if (cloudTts.isConfigured()) { speakCloud(message); return }
+            if (cloudTts.isConfigured()) { speakCloud(spokenMessage); return }
             pendingSpeech = message
             if (::status.isInitialized) status.text = "صدای فارسی نصب نیست؛ از تنظیمات، صدای فارسی آنلاین را فعال کن."
             finishSpeechTurn()
@@ -2734,7 +2747,7 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
                 .setUsage(android.media.AudioAttributes.USAGE_MEDIA)
                 .setContentType(android.media.AudioAttributes.CONTENT_TYPE_SPEECH)
                 .build())
-            tts.speak(message.trim(), TextToSpeech.QUEUE_FLUSH, android.os.Bundle().apply {
+            tts.speak(spokenMessage, TextToSpeech.QUEUE_FLUSH, android.os.Bundle().apply {
                 putFloat(TextToSpeech.Engine.KEY_PARAM_VOLUME, 1.0f)
                 putInt(TextToSpeech.Engine.KEY_PARAM_STREAM, AudioManager.STREAM_MUSIC)
             }, "jarvis_${System.nanoTime()}")
@@ -2750,6 +2763,7 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
     }
 
     private fun speakCloud(message: String) {
+        val spokenMessage = normalizeJarvisSpeech(message)
         if (!cloudTts.isConfigured()) { pendingSpeech = message; status.text = "برای صدای فارسی آنلاین، کلید سرویس را وارد کن."; return }
         setJarvisMode(JarvisOrbView.Mode.SPEAKING)
         status.text = "در حال ساخت صدای فارسی JARVIS…"
@@ -2757,7 +2771,7 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
         cloudSpeechPending = true
         speechExecutor.execute {
             try {
-                val audioFile = cloudTts.synthesize(message)
+                val audioFile = cloudTts.synthesize(spokenMessage)
                 runOnUiThread {
                     try {
                         cloudPlayer?.release()
@@ -2792,7 +2806,7 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
                     cloudSpeechPending = false
                     if (ttsReady) {
                         status.text = "صدای آنلاین پاسخ نداد؛ از صدای گوشی استفاده می‌کنم."
-                        speak(message)
+                        speak(spokenMessage)
                     } else {
                         status.text = "ساخت صدای فارسی ناموفق بود: ${e.message ?: "خطای شبکه"}"
                         finishSpeechTurn()
