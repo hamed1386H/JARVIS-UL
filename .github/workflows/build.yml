@@ -163,3 +163,5 @@ jobs:
 # Rebuild after Persian Eleven v3 voice update.
 
 # Rebuild after adding in-app diagnostics, report sharing and safe recovery in JARVIS 1.5.2.
+
+# Include the app-wide crash capture hook in the diagnostics release build.
