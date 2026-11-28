@@ -46,6 +46,8 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
     private lateinit var orbView: JarvisOrbView
     private lateinit var dynamicIsland: TextView
     private val voiceCaptureActive = java.util.concurrent.atomic.AtomicBoolean(false)
+    private val voiceCaptureGeneration = java.util.concurrent.atomic.AtomicLong(0L)
+    @Volatile private var voiceCaptureStartedAtMs = 0L
     private val whisperLoadActive = java.util.concurrent.atomic.AtomicBoolean(false)
     private lateinit var log: TextView
     private lateinit var chatScroll: ScrollView
@@ -1093,12 +1095,22 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
             }
         }
         if (voiceCaptureActive.get()) {
-            if (!voiceSessionActive) status.text = "صدای قبلی هنوز در حال پردازش است؛ کمی صبر کن…"
-            speechWatchdog.postDelayed({
-                if (activityVisible && !isFinishing && !voiceCaptureActive.get() &&
-                    !androidRecognitionActive && !isJarvisSpeaking()) beginListening()
-            }, 1200L)
-            return
+            val captureAge = android.os.SystemClock.elapsedRealtime() - voiceCaptureStartedAtMs
+            if (voiceCaptureStartedAtMs > 0L && captureAge > 45000L) {
+                // A native/offline transcription can occasionally stall without returning.
+                // Invalidate that turn so it cannot execute late, and release the UI lock.
+                voiceCaptureGeneration.incrementAndGet()
+                voiceCaptureStartedAtMs = 0L
+                voiceCaptureActive.set(false)
+                if (!voiceSessionActive) status.text = "تبدیل صدای قبلی متوقف شد؛ دوباره گوش می‌دهم…"
+            } else {
+                if (!voiceSessionActive) status.text = "صدای قبلی هنوز در حال پردازش است؛ کمی صبر کن…"
+                speechWatchdog.postDelayed({
+                    if (activityVisible && !isFinishing && !voiceCaptureActive.get() &&
+                        !androidRecognitionActive && !isJarvisSpeaking()) beginListening()
+                }, 1200L)
+                return
+            }
         }
         // Prefer Android's Persian speech service for a fast response. Whisper remains the offline fallback.
         if (SpeechRecognizer.isRecognitionAvailable(this)) {
@@ -1261,6 +1273,8 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
             status.text = "در حال پردازش صدای قبلی هستم…"
             return
         }
+        val captureGeneration = voiceCaptureGeneration.incrementAndGet()
+        voiceCaptureStartedAtMs = android.os.SystemClock.elapsedRealtime()
         status.text = "JARVIS گوش می‌دهد؛ واضح و نزدیک صحبت کن."
         setJarvisMode(JarvisOrbView.Mode.LISTENING)
         try {
@@ -1329,7 +1343,7 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
                     }
                     val words = whisper.transcribe(audio).trim()
                     runOnUiThread {
-                        if (!activityVisible) return@runOnUiThread
+                        if (!activityVisible || captureGeneration != voiceCaptureGeneration.get()) return@runOnUiThread
                         if (words.isNotBlank() && words.length >= 2) {
                             if (!voiceSessionActive) addLog("شما", words)
                             handleCommand(words)
@@ -1357,8 +1371,12 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
                         }
                     } catch (_: Exception) { }
                     try { recorder?.release() } catch (_: Exception) { }
-                    voiceCaptureActive.set(false)
+                    if (captureGeneration == voiceCaptureGeneration.get()) {
+                        voiceCaptureStartedAtMs = 0L
+                        voiceCaptureActive.set(false)
+                    }
                     runOnUiThread {
+                        if (captureGeneration != voiceCaptureGeneration.get()) return@runOnUiThread
                         if (::orbView.isInitialized) {
                             orbView.setAudioLevel(0f)
                             if (!::tts.isInitialized || !tts.isSpeaking) {
