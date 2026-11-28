@@ -74,6 +74,7 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
     // Dedicated queue: native model loading must never block online replies.
     private val aiExecutor = Executors.newSingleThreadExecutor()
     private val aiRequestActive = java.util.concurrent.atomic.AtomicBoolean(false)
+    private val pendingAiPrompts = java.util.concurrent.ConcurrentLinkedQueue<String>()
     private val aiRequestGeneration = java.util.concurrent.atomic.AtomicLong(0L)
     @Volatile private var localModelLoading = false
     private val speechWatchdog = android.os.Handler(android.os.Looper.getMainLooper())
@@ -372,6 +373,7 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
         }
         section("01  ·  VOICE & CONVERSATION", "گفتگوی زنده، صدای فارسی و موتور تشخیص", listOf(
             "شروع / پایان مکالمه صوتی زنده" to { toggleVoiceConversation() },
+            "قطع فوری صحبت و گوش‌دادن به دستور جدید" to { interruptSpeechAndListen() },
             "انتخاب صدای خروجی JARVIS" to { showVoicePicker() },
             "تنظیم صدای فارسی آنلاین" to { showPersianCloudTtsSettings() },
             "فعال‌سازی موتور Whisper" to { promptWhisperModelDownload() }
@@ -2554,7 +2556,14 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
             return
         }
         if (!aiRequestActive.compareAndSet(false, true)) {
-            reply("در حال پاسخ‌گویی به درخواست قبلی هستم؛ درخواست جدید را در صف طولانی نمی‌گذارم. کمی بعد دوباره بگو.")
+            if (prompt.isNotBlank() && pendingAiPrompts.size < 5 && pendingAiPrompts.offer(prompt.take(2500))) {
+                val queued = pendingAiPrompts.size
+                status.text = "درخواستت در صف قرار گرفت؛ نوبت $queued"
+                addLog("JARVIS", "درخواستت در صف قرار گرفت؛ بعد از کار فعلی انجامش می‌دم.")
+            } else {
+                status.text = "صف فرمان‌ها پر است؛ بعد از پایان کار فعلی دوباره بگو."
+                addLog("JARVIS", "صف فرمان‌ها پر است؛ این درخواست ذخیره نشد.")
+            }
             return
         }
         val requestId = aiRequestGeneration.incrementAndGet()
@@ -2600,7 +2609,7 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
                         val localPrompt = agentCore.buildLocalPrompt(prompt, conversation)
                         localAi.generate(localPrompt, 96).trim()
                     }
-                    val cleaned = answer.replace(Regex("<think>[\\s\\S]*?</think>"), "").trim()
+                    val cleaned = normalizePersianOutput(answer.replace(Regex("<think>[\\s\\S]*?</think>"), "").trim())
                     if (cleaned.isBlank()) throw IllegalStateException("پاسخ دستیار خالی بود.")
                     runOnUiThread {
                         if (isFinishing || requestId != aiRequestGeneration.get()) return@runOnUiThread
@@ -2630,7 +2639,18 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
                         if (!isFinishing && requestId == aiRequestGeneration.get())
                             reply("پاسخ‌گویی ناموفق بود: ${e.message ?: "خطای شبکه یا مدل"}")
                     }
-                } finally { aiRequestActive.set(false) }
+                } finally {
+                    aiRequestActive.set(false)
+                    val nextPrompt = pendingAiPrompts.poll()
+                    if (!nextPrompt.isNullOrBlank()) {
+                        runOnUiThread {
+                            if (!isFinishing) {
+                                status.text = "در حال اجرای درخواست بعدی از صف…"
+                                speechWatchdog.postDelayed({ if (!isFinishing) askLocal(nextPrompt) }, 350L)
+                            }
+                        }
+                    }
+                }
             }
         } catch (_: java.util.concurrent.RejectedExecutionException) {
             aiRequestActive.set(false)
@@ -2673,7 +2693,43 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
             .show()
     }
 
-    private fun reply(message: String) { status.text = message; addLog("JARVIS", message); speak(message) }
+    private fun normalizePersianOutput(raw: String): String {
+        var value = raw.trim()
+        value = value.replace(Regex("(?i)^\\s*(?:sure|okay|ok|of course|certainly|hello|hi)[!,. :—-]+"), "").trim()
+        val replacements = listOf(
+            "چه کاری می‌توانم برای شما انجام دهم؟" to "چیکار می‌تونم برات انجام بدم؟",
+            "هدف شما چیست؟" to "واسه چی می‌خوای؟",
+            "متوجه درخواست شما نشدم." to "نفهمیدم چی گفتی؛ یه بار دیگه بگو.",
+            "آیا مایل به ادامه هستید؟" to "ادامه بدم؟",
+            "درخواست شما انجام شد." to "انجام شد، دیگه چی؟",
+            "لطفاً منتظر بمانید." to "یه لحظه صبر کن."
+        )
+        replacements.forEach { (formal, casual) -> value = value.replace(formal, casual) }
+        return value
+    }
+
+    private fun interruptSpeechAndListen() {
+        try { if (::tts.isInitialized) tts.stop() } catch (_: Exception) {}
+        try { cloudPlayer?.stop(); cloudPlayer?.release() } catch (_: Exception) {}
+        cloudPlayer = null
+        cloudSpeechPending = false
+        pendingSpeech = null
+        speechWatchdogTask?.let { speechWatchdog.removeCallbacks(it) }
+        speechWatchdogTask = null
+        setJarvisMode(JarvisOrbView.Mode.IDLE)
+        status.text = "صحبت قطع شد؛ گوش می‌دم."
+        if (!voiceSessionActive) toggleVoiceConversation()
+        else speechWatchdog.postDelayed({
+            if (voiceSessionActive && activityVisible && !isFinishing) beginListening()
+        }, 250L)
+    }
+
+    private fun reply(message: String) {
+        val natural = normalizePersianOutput(message)
+        status.text = natural
+        addLog("JARVIS", natural)
+        speak(natural)
+    }
     private fun isJarvisSpeaking(): Boolean {
         return cloudSpeechPending || try { (::tts.isInitialized && tts.isSpeaking) || (cloudPlayer?.isPlaying == true) } catch (_: Exception) { false }
     }
