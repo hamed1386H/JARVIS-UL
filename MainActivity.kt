@@ -99,6 +99,7 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
     private val requestDownloadFolder = 108
     private val requestSmsContacts = 109
     private val requestContactAction = 110
+    private val requestMediaShare = 112
     private var pendingSmsRecipient = ""
     private var pendingSmsNumber = ""
     private var pendingSmsBody = ""
@@ -155,6 +156,7 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
             else TextToSpeech(this, this, preferredTtsEngine)
         restoreConversation()
         buildUi()
+        handleIncomingShareIntent(intent)
         registerModelDownloadReceiver()
         autoLoadLocalModel()
         autoLoadWhisperModel()
@@ -413,6 +415,15 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
         ))
         section("07  ·  APP AUTOMATION", "کنترل برنامه‌ها فقط پس از فعال‌سازی دستی سرویس دسترس‌پذیری اندروید", listOf(
             "فعال‌سازی کنترل برنامه‌ها" to { showAccessibilityConsent() },
+            "انتخاب عکس یا ویس و ارسال به برنامه دیگر" to { chooseMediaToShare() },
+            "اشتراک‌گذاری متن با برنامه‌ها" to {
+                val field = EditText(this).apply { hint = "متنی که می‌خوای بفرستی"; minLines = 2 }
+                AlertDialog.Builder(this).setTitle("ارسال متن").setView(field)
+                    .setPositiveButton("انتخاب برنامه") { _, _ ->
+                        val send = Intent(Intent.ACTION_SEND).apply { type = "text/plain"; putExtra(Intent.EXTRA_TEXT, field.text.toString()) }
+                        startActivity(Intent.createChooser(send, "ارسال متن با برنامه دلخواه"))
+                    }.setNegativeButton("لغو", null).show()
+            },
             "وضعیت مجوز کنترل برنامه‌ها" to {
                 status.text = if (isAutomationEnabled()) "مجوز کنترل برنامه‌ها فعال است." else "مجوز کنترل برنامه‌ها هنوز فعال نشده است."
             },
@@ -992,6 +1003,7 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
         super.onNewIntent(intent)
         setIntent(intent)
         handleWakeIntent(intent)
+        handleIncomingShareIntent(intent)
     }
 
     private fun handleWakeIntent(source: Intent?) {
@@ -1777,6 +1789,11 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
             }
             return
         }
+        if (requestCode == requestMediaShare && resultCode == RESULT_OK) {
+            val uri = data?.data
+            if (uri != null) shareUriWithApps(uri) else status.text = "فایلی انتخاب نشد."
+            return
+        }
         if (requestCode == requestWhisperModel && resultCode == RESULT_OK) {
             val uri = data?.data
             if (uri != null) importWhisperModel(uri) else reply("فایلی انتخاب نشد")
@@ -1823,6 +1840,153 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
                 if (matches.size == 1) matches.first() else word
             }
         }
+    }
+
+    private fun handleIncomingShareIntent(source: Intent?) {
+        if (source == null) return
+        val action = source.action ?: return
+        if (action != Intent.ACTION_SEND && action != Intent.ACTION_SEND_MULTIPLE) return
+        val mime = source.type.orEmpty()
+        val sharedText = source.getCharSequenceExtra(Intent.EXTRA_TEXT)?.toString()?.trim().orEmpty()
+        @Suppress("DEPRECATION")
+        val uri = source.getParcelableExtra<Uri>(Intent.EXTRA_STREAM)
+        source.action = null
+        when {
+            mime.startsWith("image/") && uri != null -> analyzeSharedImage(uri)
+            mime.startsWith("audio/") && uri != null -> transcribeSharedAudio(uri, mime)
+            sharedText.isNotBlank() -> {
+                addLog("شما", sharedText)
+                addConversationMessage("user", sharedText)
+                askLocal(sharedText)
+            }
+            else -> {
+                status.text = "فایل دریافت شد، اما نوع آن پشتیبانی نمی‌شود."
+                addLog("JARVIS", status.text.toString())
+            }
+        }
+    }
+
+    private fun analyzeSharedImage(uri: Uri) {
+        if (!agentCore.isOnlineConfigured() || !prefs.getBoolean("online_ai_enabled", true)) {
+            status.text = "برای تحلیل عکس، اتصال هوش آنلاین را در تنظیمات فعال کن."
+            addLog("JARVIS", status.text.toString())
+            return
+        }
+        status.text = "عکس دریافت شد؛ دارم بررسیش می‌کنم…"
+        executor.execute {
+            try {
+                val bounds = android.graphics.BitmapFactory.Options().apply { inJustDecodeBounds = true }
+                contentResolver.openInputStream(uri)?.use { android.graphics.BitmapFactory.decodeStream(it, null, bounds) }
+                    ?: throw IllegalStateException("خواندن تصویر ممکن نشد.")
+                val maxSide = maxOf(bounds.outWidth, bounds.outHeight).coerceAtLeast(1)
+                var sample = 1
+                while (maxSide / sample > 1400) sample *= 2
+                val options = android.graphics.BitmapFactory.Options().apply { inSampleSize = sample }
+                var bitmap = contentResolver.openInputStream(uri)?.use { android.graphics.BitmapFactory.decodeStream(it, null, options) }
+                    ?: throw IllegalStateException("قالب تصویر پشتیبانی نمی‌شود.")
+                if (maxOf(bitmap.width, bitmap.height) > 1400) {
+                    val scale = 1400f / maxOf(bitmap.width, bitmap.height)
+                    val scaled = android.graphics.Bitmap.createScaledBitmap(bitmap, (bitmap.width * scale).toInt().coerceAtLeast(1),
+                        (bitmap.height * scale).toInt().coerceAtLeast(1), true)
+                    if (scaled !== bitmap) bitmap.recycle()
+                    bitmap = scaled
+                }
+                val output = java.io.ByteArrayOutputStream()
+                bitmap.compress(android.graphics.Bitmap.CompressFormat.JPEG, 82, output)
+                bitmap.recycle()
+                val encoded = android.util.Base64.encodeToString(output.toByteArray(), android.util.Base64.NO_WRAP)
+                val answer = agentCore.askOnlineImage("این تصویر را با دقت بررسی کن و به فارسی محاوره‌ای توضیح بده چه چیزی در آن دیده می‌شود. اگر سؤال مشخصی داده نشده، توصیف کوتاه و مفید ارائه کن.", encoded)
+                runOnUiThread {
+                    if (isFinishing) return@runOnUiThread
+                    val natural = normalizePersianOutput(answer)
+                    addLog("JARVIS", natural)
+                    addConversationMessage("assistant", natural)
+                    status.text = "بررسی عکس تموم شد."
+                    speak(natural)
+                }
+            } catch (e: Exception) {
+                runOnUiThread {
+                    if (!isFinishing) {
+                        status.text = "تحلیل عکس انجام نشد: " + (e.message ?: "خطای سرویس")
+                        addLog("JARVIS", status.text.toString())
+                    }
+                }
+            }
+        }
+    }
+
+    private fun transcribeSharedAudio(uri: Uri, mime: String) {
+        if (!agentCore.isOnlineConfigured() || !prefs.getBoolean("online_ai_enabled", true)) {
+            status.text = "برای فهم ویس، اتصال هوش آنلاین را فعال کن."
+            addLog("JARVIS", status.text.toString())
+            return
+        }
+        status.text = "ویس دریافت شد؛ دارم به متن تبدیلش می‌کنم…"
+        executor.execute {
+            try {
+                val bytes = contentResolver.openInputStream(uri)?.use { input ->
+                    val output = java.io.ByteArrayOutputStream()
+                    val buffer = ByteArray(8192)
+                    var total = 0
+                    while (true) {
+                        val count = input.read(buffer)
+                        if (count < 0) break
+                        total += count
+                        require(total <= 25 * 1024 * 1024) { "حجم ویس بیشتر از ۲۵ مگابایت است." }
+                        output.write(buffer, 0, count)
+                    }
+                    output.toByteArray()
+                } ?: throw IllegalStateException("خواندن فایل صوتی ممکن نشد.")
+                val name = queryDisplayName(uri) ?: "voice.m4a"
+                val transcript = agentCore.transcribeAudio(bytes, mime, name)
+                runOnUiThread {
+                    if (isFinishing) return@runOnUiThread
+                    addLog("متن ویس", transcript)
+                    addConversationMessage("user", "متن فایل صوتی: " + transcript)
+                    status.text = "ویس تبدیل شد؛ دارم مفهومش رو بررسی می‌کنم…"
+                    askLocal("این متن از فایل صوتی کاربر به دست آمده؛ منظور و درخواستش را بررسی کن و پاسخ بده:\n" + transcript)
+                }
+            } catch (e: Exception) {
+                runOnUiThread {
+                    if (!isFinishing) {
+                        status.text = "خواندن ویس ناموفق بود: " + (e.message ?: "خطا")
+                        addLog("JARVIS", status.text.toString())
+                    }
+                }
+            }
+        }
+    }
+
+    private fun queryDisplayName(uri: Uri): String? {
+        return try {
+            contentResolver.query(uri, arrayOf(android.provider.OpenableColumns.DISPLAY_NAME), null, null, null)?.use { cursor ->
+                if (cursor.moveToFirst()) cursor.getString(0) else null
+            }
+        } catch (_: Exception) { null }
+    }
+
+    private fun chooseMediaToShare() {
+        try {
+            val pick = Intent(Intent.ACTION_GET_CONTENT).apply {
+                type = "*/*"
+                addCategory(Intent.CATEGORY_OPENABLE)
+                addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+            }
+            startActivityForResult(Intent.createChooser(pick, "عکس، ویس یا فایل را انتخاب کن"), requestMediaShare)
+        } catch (_: Exception) { status.text = "بازکردن انتخاب‌گر فایل ممکن نشد." }
+    }
+
+    private fun shareUriWithApps(uri: Uri) {
+        try {
+            val mime = contentResolver.getType(uri) ?: "*/*"
+            val send = Intent(Intent.ACTION_SEND).apply {
+                type = mime
+                putExtra(Intent.EXTRA_STREAM, uri)
+                clipData = android.content.ClipData.newUri(contentResolver, "JARVIS media", uri)
+                addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+            }
+            startActivity(Intent.createChooser(send, "ارسال فایل با برنامه دلخواه"))
+        } catch (_: Exception) { status.text = "اشتراک‌گذاری فایل ممکن نشد." }
     }
 
     private fun isAutomationEnabled(): Boolean {
