@@ -608,6 +608,19 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
             .setPositiveButton("ارسال گزارش") { _, _ -> shareJarvisDiagnosticReport() }
             .setNeutralButton("تعمیر خودکار") { _, _ -> diagnoseAndRepairJarvis() }
             .setNegativeButton("بستن", null).show()
+        val lines = report.lines()
+        val statusLines = lines.filter { it.startsWith("✗") || it.startsWith("✓") }
+        val errorIndex = lines.indexOfFirst { it.contains("خطاهای ثبت‌شده اخیر") }
+        val recentErrors = if (errorIndex >= 0) lines.drop(errorIndex + 1)
+            .filter { it.isNotBlank() && !it.startsWith("راهنما:") && !it.startsWith("حریم خصوصی:") }
+            .takeLast(5).joinToString("؛ ") { it.take(180) } else ""
+        val spoken = buildString {
+            append("گزارش عیب‌یابی جارویس. ")
+            statusLines.forEach { append(it).append(". ") }
+            if (recentErrors.isNotBlank()) append("خطاهای اخیر: ").append(recentErrors)
+            else append("خطای ثبت‌شده‌ای در گزارش پیدا نشد.")
+        }.take(2600)
+        speak(spoken)
     }
 
     private fun shareJarvisDiagnosticReport() {
@@ -1710,10 +1723,49 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
     }
 
     private fun normalize(s: String): String = s.lowercase(Locale("fa", "IR"))
-        .replace("ي", "ی").replace("ك", "ک").replace("‌", " ").replace("ؤ", "و").replace("۰", "0").replace("۱", "1").replace("۲", "2").replace("۳", "3").replace("۴", "4").replace("۵", "5").replace("۶", "6").replace("۷", "7").replace("۸", "8").replace("۹", "9")
+        .replace("ي", "ی").replace("ك", "ک").replace("‌", " ").replace("ؤ", "و")
+        .replace(Regex("[\\u064B-\\u065F\\u0670]"), "")
+        .replace("ة", "ه")
+        .replace("۰", "0").replace("۱", "1").replace("۲", "2").replace("۳", "3").replace("۴", "4").replace("۵", "5").replace("۶", "6").replace("۷", "7").replace("۸", "8").replace("۹", "9")
+
+    // Correct only clear one-character mistakes in a small command vocabulary.
+    // This catches omitted final letters without rewriting arbitrary names or message text.
+    private fun correctCommandTypos(value: String): String {
+        val vocabulary = listOf(
+            "جارویس", "گزارش", "اشکال", "خطاها", "خطا", "عیب", "یابی", "تعمیر",
+            "خودکار", "تنظیمات", "میکروفون", "گوش", "چراغ", "فلش", "فلاش",
+            "بلوتوث", "تماس", "بگیر", "بزن", "پیامک", "پیام", "بفرست", "ارسال",
+            "روشن", "خاموش", "روشنایی", "باتری", "برنامه", "هواشناسی", "جستجو",
+            "سرچ", "مخاطب", "اینترنت", "آنلاین", "محلی", "مدل", "دانلود"
+        )
+        fun distanceOne(a: String, b: String): Boolean {
+            if (kotlin.math.abs(a.length - b.length) > 1 || a == b) return false
+            var i = 0; var j = 0; var edits = 0
+            while (i < a.length && j < b.length) {
+                if (a[i] == b[j]) { i++; j++; continue }
+                edits++
+                if (edits > 1) return false
+                when {
+                    a.length == b.length -> { i++; j++ }
+                    a.length > b.length -> i++
+                    else -> j++
+                }
+            }
+            if (i < a.length || j < b.length) edits++
+            return edits == 1
+        }
+        return normalize(value).split(Regex("\\s+")).joinToString(" ") { word ->
+            if (word.length < 4 || word in vocabulary) word
+            else {
+                val matches = vocabulary.filter { distanceOne(word, it) }
+                if (matches.size == 1) matches.first() else word
+            }
+        }
+    }
 
     private fun handleCommand(raw: String) {
-        val q = normalize(raw).trim()
+        val corrected = correctCommandTypos(raw)
+        val q = normalize(corrected).trim()
         if (q == "جارویس" || q == "هی جارویس" || q == "سلام جارویس" || q == "بیدار شو" || q == "بیدار" ||
             q == "جارویس بیدار شو" || q == "جارویس گوش کن") {
             reply("در خدمتم")
@@ -1738,21 +1790,21 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
             reply("مرکز تنظیمات جارویس باز شد.")
             return
         }
-        val googleQuery = extractGoogleSearchQuery(raw)
+        val googleQuery = extractGoogleSearchQuery(corrected)
         if (!googleQuery.isNullOrBlank()) { openGoogleSearch(googleQuery); return }
         if (q.contains("هواشناسی") || q.contains("آب و هوا") || q.contains("اب و هوا") || q.contains("وضعیت هوا")) {
             val place = Regex("""(?:در|برای|شهر)\s+(.+?)(?:\s+(?:رو|را)?\s*(?:چک کن|بررسی کن))?$""").find(q)?.groupValues?.get(1)?.trim().orEmpty()
             openGoogleSearch(if (place.isBlank()) "هواشناسی امروز" else "هواشناسی $place")
             return
         }
-        val callRecipient = parseCallRequest(raw)
+        val callRecipient = parseCallRequest(corrected)
         if (!callRecipient.isNullOrBlank()) { beginContactAction(callRecipient, "", "call"); return }
         if ((q.contains("تماس") || q.contains("زنگ") || q.contains("تلفن")) &&
             (q.contains("بگیر") || q.contains("بزن"))) {
             reply("نام مخاطب را واضح بگو؛ مثلاً: جارویس، به علی زنگ بزن.")
             return
         }
-        val smsRequest = parseSmsRequest(raw)
+        val smsRequest = parseSmsRequest(corrected)
         if (smsRequest != null) { beginContactAction(smsRequest.first, smsRequest.second, "sms"); return }
         if (q.contains("پیام") || q.contains("پیامک") || q.contains("اس ام اس") || q.contains("sms")) {
             reply("برای انجام پیام، نام مخاطب و متن پیام را کامل بنویس یا بگو. مثال: به علی پیام بده سلام.")
@@ -1782,7 +1834,7 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
             q.contains("برنامه ها") || q.contains("اپلیکیشن") || q.contains("فهرست برنامه") -> showApps()
             q.contains("تنظیمات باتری") || q.contains("باتری") -> openSettings(Settings.ACTION_BATTERY_SAVER_SETTINGS)
             q.contains("تنظیمات") -> openSettings(Settings.ACTION_SETTINGS)
-            else -> askLocal(raw)
+            else -> askLocal(corrected)
         }
     }
 
@@ -2476,10 +2528,21 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
                                 maxTokens = if (voiceSessionActive) 128 else 160
                             ).trim()
                         } catch (onlineError: Exception) {
-                            if (!localEnabled || !localAi.isLoaded() || voiceSessionActive) throw onlineError
-                            runOnUiThread { if (!isFinishing && requestId == aiRequestGeneration.get()) status.text = "پاسخ آنلاین نرسید؛ تلاش کوتاه با مدل محلی…" }
+                            if (!localEnabled) throw onlineError
+                            runOnUiThread { if (!isFinishing && requestId == aiRequestGeneration.get()) status.text = "پاسخ آنلاین نرسید؛ انتقال به هوش محلی…" }
+                            if (!localAi.isLoaded()) {
+                                val savedPath = prefs.getString("local_model_path", "") ?: ""
+                                val savedFile = if (savedPath.isNotBlank()) java.io.File(savedPath) else localModelFile
+                                check(savedFile.isFile && isValidGguf(savedFile, 100000000L)) {
+                                    "مدل محلی نصب یا آماده بارگذاری نیست؛ فایل GGUF را بررسی کن."
+                                }
+                                val deadline = System.currentTimeMillis() + 30000L
+                                while (localModelLoading && !localAi.isLoaded() && System.currentTimeMillis() < deadline) Thread.sleep(250L)
+                                if (!localAi.isLoaded()) localAi.load(savedFile.absolutePath, 2, 1024)
+                            }
+                            check(localAi.isLoaded()) { "موتور هوش محلی بارگذاری نشد." }
                             val localPrompt = agentCore.buildLocalPrompt(prompt, conversation)
-                            localAi.generate(localPrompt, 96).trim()
+                            localAi.generate(localPrompt, 128).trim()
                         }
                     } else {
                         val localPrompt = agentCore.buildLocalPrompt(prompt, conversation)
