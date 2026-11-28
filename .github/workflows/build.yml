@@ -161,3 +161,5 @@ jobs:
 # Rebuild after Persian voice and app-access integration.
 
 # Rebuild after Persian Eleven v3 voice update.
+
+# Rebuild after adding in-app diagnostics, report sharing and safe recovery in JARVIS 1.5.2.
