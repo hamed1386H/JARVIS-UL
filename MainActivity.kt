@@ -2406,6 +2406,21 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
         }
         if (::orbView.isInitialized) setJarvisMode(JarvisOrbView.Mode.SPEAKING)
         armSpeechWatchdog()
+        // Re-assert Persian immediately before every utterance. Some OEM TTS engines
+        // silently switch back to their default (often English) after an earlier request.
+        val faResult = try {
+            val exact = tts.setLanguage(Locale.forLanguageTag("fa-IR"))
+            if (exact < TextToSpeech.LANG_AVAILABLE) tts.setLanguage(Locale("fa")) else exact
+        } catch (_: Exception) { TextToSpeech.LANG_NOT_SUPPORTED }
+        if (faResult < TextToSpeech.LANG_AVAILABLE) {
+            if (cloudTts.isConfigured()) speakCloud(message)
+            else {
+                pendingSpeech = null
+                status.text = "صدای فارسی گوشی در دسترس نیست؛ بسته گفتار فارسی را نصب کن."
+                finishSpeechTurn()
+            }
+            return
+        }
         val result = try {
             tts.setAudioAttributes(android.media.AudioAttributes.Builder()
                 .setUsage(android.media.AudioAttributes.USAGE_MEDIA)
