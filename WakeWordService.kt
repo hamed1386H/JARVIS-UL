@@ -661,7 +661,9 @@ class WakeWordService : Service() {
                 return agent.askOnline(
                     "به عنوان JARVIS به این درخواست کاربر کوتاه، دقیق و به فارسی پاسخ بده. " +
                         "برنامه در پس‌زمینه است؛ هیچ ادعایی درباره اجرای عملیات گوشی نکن. درخواست: " + command.take(1800),
-                    maxTokens = 180
+                    maxTokens = 180,
+                    connectTimeoutMs = 2500,
+                    readTimeoutMs = 5000
                 ).trim().ifBlank { "پاسخ خالی دریافت شد؛ دوباره تلاش کن." }
             } catch (_: Exception) {
                 // Fall back to the downloaded on-device model.
