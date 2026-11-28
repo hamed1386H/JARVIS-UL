@@ -97,7 +97,22 @@ class WakeWordService : Service() {
         }
         getSystemService(NotificationManager::class.java).cancel(wakeNotificationId)
         if (running.compareAndSet(false, true)) {
-            worker = Thread { localWakeLoop() }.also {
+            worker = Thread {
+                var failures = 0
+                while (running.get() && failures < 5) {
+                    localWakeLoop()
+                    if (!running.get()) break
+                    failures++
+                    updateNotification("ارتباط میکروفون قطع شد؛ تلاش مجدد " + failures + " از 5")
+                    try { Thread.sleep((1500L * failures).coerceAtMost(7000L)) }
+                    catch (_: InterruptedException) { break }
+                }
+                if (running.get()) {
+                    running.set(false)
+                    updateNotification("گوش‌به‌زنگ متوقف شد؛ جارویس را باز کن و دوباره فعالش کن")
+                    stopSelf()
+                }
+            }.also {
                 it.name = "Jarvis-Local-Wake"
                 it.start()
             }
@@ -174,8 +189,8 @@ class WakeWordService : Service() {
                 updateNotification("گوش‌به‌زنگ فعال است؛ بگو " + configuredWakePhrase())
             }
         } catch (e: Exception) {
-            updateNotification("گوش‌به‌زنگ متوقف شد: " + (e.message ?: "خطای میکروفون"))
-            running.set(false)
+            // Keep the foreground service alive and let its supervisor recreate AudioRecord/Whisper.
+            updateNotification("خطای موقت تشخیص صدا: " + (e.message ?: "میکروفون") + "؛ تلاش برای بازیابی")
         } finally {
             try { recorder?.stop() } catch (_: Exception) {}
             try { recorder?.release() } catch (_: Exception) {}
