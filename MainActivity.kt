@@ -998,7 +998,17 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
             try { unregisterReceiver(wakeDetectedReceiver) } catch (_: Exception) {}
             wakeReceiverRegistered = false
         }
-        if (androidRecognitionActive) {
+        if (voiceSessionActive) {
+            // Hand off from the foreground conversation to the persistent wake-word
+            // service when the app is backgrounded or the screen is turned off.
+            voiceSessionActive = false
+            androidRecognitionActive = false
+            destroySpeechRecognizer()
+            try { voiceDialog?.dismiss() } catch (_: Exception) {}
+            voiceDialog = null
+            voiceOrb = null
+            if (prefs.getBoolean("wake_mode_enabled", false)) startWakeServiceNow()
+        } else if (androidRecognitionActive) {
             androidRecognitionActive = false
             destroySpeechRecognizer()
         }
