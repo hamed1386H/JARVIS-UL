@@ -33,8 +33,27 @@ class WakeWordService : Service() {
     private val backgroundLocalAi = LocalAiEngine()
     private val backgroundLocalAiLoaded = AtomicBoolean(false)
 
+    // The Activity and the foreground service share this private log. Service failures
+    // were previously visible only in the notification, so diagnostics falsely said "No errors".
+    private fun logWakeEvent(message: String, error: Throwable? = null) {
+        try {
+            val file = File(filesDir, "jarvis_diagnostics.log")
+            val stamp = java.text.SimpleDateFormat("yyyy-MM-dd HH:mm:ss", java.util.Locale.US)
+                .format(java.util.Date())
+            val details = if (error == null) "" else "\\n" +
+                android.util.Log.getStackTraceString(error).take(12000)
+            synchronized(WAKE_LOG_LOCK) {
+                file.appendText("\\n[" + stamp + "] wake_service: " + message +
+                    (error?.let { " / " + it.javaClass.simpleName + ": " + it.message } ?: "") +
+                    details + "\\n")
+                if (file.length() > 512000L) file.writeText(file.readText().takeLast(256000))
+            }
+        } catch (_: Exception) {}
+    }
+
     override fun onCreate() {
         super.onCreate()
+        logWakeEvent("service created")
         createChannel()
         startForeground(notificationId, buildNotification("در حال آماده‌سازی تشخیص آفلاین فارسی"))
         try {
@@ -91,24 +110,28 @@ class WakeWordService : Service() {
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         if (intent?.action == ACTION_STOP) {
+            logWakeEvent("stop requested by user")
             running.set(false)
             stopSelf()
             return START_NOT_STICKY
         }
         getSystemService(NotificationManager::class.java).cancel(wakeNotificationId)
         if (running.compareAndSet(false, true)) {
+            logWakeEvent("worker starting")
             worker = Thread {
                 var failures = 0
                 while (running.get() && failures < 5) {
                     localWakeLoop()
                     if (!running.get()) break
                     failures++
+                    logWakeEvent("wake loop ended unexpectedly; retry " + failures + " of 5")
                     updateNotification("ارتباط میکروفون قطع شد؛ تلاش مجدد " + failures + " از 5")
                     try { Thread.sleep((1500L * failures).coerceAtMost(7000L)) }
                     catch (_: InterruptedException) { break }
                 }
                 if (running.get()) {
                     running.set(false)
+                    logWakeEvent("worker stopped after five failed attempts")
                     updateNotification("گوش‌به‌زنگ متوقف شد؛ جارویس را باز کن و دوباره فعالش کن")
                     stopSelf()
                 }
@@ -124,6 +147,8 @@ class WakeWordService : Service() {
         val model = File(getExternalFilesDir(Environment.DIRECTORY_DOWNLOADS)
             ?: File(filesDir, "models"), "ggml-base.bin")
         if (!model.isFile || model.length() < 50_000_000L) {
+            logWakeEvent("Whisper model missing or too small: " + model.absolutePath +
+                " / bytes=" + (if (model.exists()) model.length() else 0L))
             updateNotification("برای گوش‌به‌زنگ آفلاین، ابتدا مدل Whisper را در JARVIS دانلود کن")
             running.set(false)
             stopSelf()
@@ -133,7 +158,9 @@ class WakeWordService : Service() {
         val engine = WhisperEngine()
         var recorder: AudioRecord? = null
         try {
+            logWakeEvent("loading Whisper model: " + model.length() + " bytes")
             engine.load(model.absolutePath)
+            logWakeEvent("Whisper model loaded")
             val rate = 16000
             val min = AudioRecord.getMinBufferSize(rate, AudioFormat.CHANNEL_IN_MONO,
                 AudioFormat.ENCODING_PCM_16BIT)
@@ -143,6 +170,7 @@ class WakeWordService : Service() {
                 maxOf(min, 12800))
             check(recorder.state == AudioRecord.STATE_INITIALIZED) { "میکروفون آماده نشد." }
             recorder.startRecording()
+            logWakeEvent("AudioRecord started; standby listening")
             updateNotification("گوش‌به‌زنگ سریع آفلاین فعال است؛ بگو جارویس")
 
             val readBuffer = ShortArray(3200)
@@ -190,7 +218,8 @@ class WakeWordService : Service() {
                 updateNotification("گوش‌به‌زنگ فعال است؛ بگو " + configuredWakePhrase())
             }
         } catch (e: Exception) {
-            // Keep the foreground service alive and let its supervisor recreate AudioRecord/Whisper.
+            // Persist the actual exception so the diagnostic report can identify why wake failed.
+            logWakeEvent("wake loop exception", e)
             updateNotification("خطای موقت تشخیص صدا: " + (e.message ?: "میکروفون") + "؛ تلاش برای بازیابی")
         } finally {
             try { recorder?.stop() } catch (_: Exception) {}
@@ -627,6 +656,7 @@ class WakeWordService : Service() {
         const val ACTION_STOP = "com.chtai.assistant.STOP_WAKE"
         const val ACTION_WAKE_DETECTED = "com.chtai.assistant.WAKE_DETECTED"
         private const val ANSWER_CHANNEL_ID = "jarvis_background_answers"
+        private val WAKE_LOG_LOCK = Any()
     }
 
     override fun onDestroy() {
@@ -634,6 +664,7 @@ class WakeWordService : Service() {
         try { worker?.interrupt() } catch (_: Exception) {}
         try { if (wakeLock?.isHeld == true) wakeLock?.release() } catch (_: Exception) {}
         wakeLock = null
+        logWakeEvent("service destroyed")
         super.onDestroy()
     }
 
