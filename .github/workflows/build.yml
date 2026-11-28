@@ -36,6 +36,7 @@ jobs:
         run: |
           install -D AndroidManifest.xml jarvis-source/app/src/main/AndroidManifest.xml
           install -D MainActivity.kt jarvis-source/app/src/main/java/com/chtai/assistant/MainActivity.kt
+          install -D JarvisAccessibilityService.kt jarvis-source/app/src/main/java/com/chtai/assistant/JarvisAccessibilityService.kt
           install -D PersianCloudTts.kt jarvis-source/app/src/main/java/com/chtai/assistant/PersianCloudTts.kt
           install -D LocalAiEngine.kt jarvis-source/app/src/main/java/com/chtai/assistant/LocalAiEngine.kt
           install -D jarvis_llama.cpp jarvis-source/app/src/main/cpp/jarvis_llama.cpp
