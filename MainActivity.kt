@@ -114,6 +114,7 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
     }
     private var modelReceiverRegistered = false
     private var wakeReceiverRegistered = false
+    private var automationResultReceiverRegistered = false
     @Volatile private var wakePromptPending = false
     @Volatile private var wakeCommandInProgress = false
     private val wakeDetectedReceiver = object : BroadcastReceiver() {
@@ -121,6 +122,16 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
             if (intent?.action == WakeWordService.ACTION_WAKE_DETECTED && activityVisible) {
                 wakePromptPending = true
                 reply("در خدمتم، بگو چه کاری انجام بدهم")
+            }
+        }
+    }
+    private val automationResultReceiver = object : BroadcastReceiver() {
+        override fun onReceive(context: Context?, intent: Intent?) {
+            val success = intent?.getBooleanExtra(JarvisAccessibilityService.EXTRA_SUCCESS, false) ?: false
+            val message = if (success) "فرمان کنترل برنامه انجام شد." else "برنامه مقصد فرمان را نپذیرفت؛ روی بخش موردنظر تمرکز کن و دوباره بگو."
+            if (::status.isInitialized) {
+                status.text = message
+                addLog("JARVIS", message)
             }
         }
     }
@@ -983,6 +994,10 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
         activityVisible = true
         updatePermissionStatus()
         if (::status.isInitialized && isAutomationEnabled()) status.text = "کنترل برنامه‌ها آماده است."
+        if (!automationResultReceiverRegistered) {
+            ContextCompat.registerReceiver(this, automationResultReceiver, IntentFilter(JarvisAccessibilityService.ACTION_RESULT), ContextCompat.RECEIVER_NOT_EXPORTED)
+            automationResultReceiverRegistered = true
+        }
         scanGrantedDownloadFolder()
         if (!wakeReceiverRegistered) {
             ContextCompat.registerReceiver(this, wakeDetectedReceiver,
@@ -1021,6 +1036,10 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
         if (wakeReceiverRegistered) {
             try { unregisterReceiver(wakeDetectedReceiver) } catch (_: Exception) {}
             wakeReceiverRegistered = false
+        }
+        if (automationResultReceiverRegistered) {
+            try { unregisterReceiver(automationResultReceiver) } catch (_: Exception) {}
+            automationResultReceiverRegistered = false
         }
         if (voiceSessionActive) {
             // Hand off from the foreground conversation to the persistent wake-word
