@@ -1816,7 +1816,7 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
             if (i < a.length || j < b.length) edits++
             return edits == 1
         }
-        return normalize(value).split(Regex("\\s+")).joinToString(" ") { word ->
+        return normalize(value).split(Regex("\s+")).joinToString(" ") { word ->
             if (word.length < 4 || word in vocabulary) word
             else {
                 val matches = vocabulary.filter { distanceOne(word, it) }
@@ -1912,7 +1912,7 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
             reply("برای انجام پیام، نام مخاطب و متن پیام را کامل بنویس یا بگو. مثال: به علی پیام بده سلام.")
             return
         }
-        val appAndText = Regex("""(?:برو تو|باز کن)\\s+(.+?)\\s+و\\s+(?:بنویس|تایپ کن)\\s+(.+)$""").find(corrected)
+        val appAndText = Regex("""(?:برو تو|باز کن)\s+(.+?)\s+و\s+(?:بنویس|تایپ کن)\s+(.+)$""").find(corrected)
         if (appAndText != null) {
             val appName = appAndText.groupValues[1].trim()
             val textToType = appAndText.groupValues[2].trim()
@@ -1927,7 +1927,7 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
             openVpnSettingsForUser()
             return
         }
-        val tapMatch = Regex("""(?:روی|رو)\\s+(.+?)\\s+(?:بزن|کلیک کن)$""").find(q)
+        val tapMatch = Regex("""(?:روی|رو)\s+(.+?)\s+(?:بزن|کلیک کن)$""").find(q)
         if (tapMatch != null) {
             if (sendAutomationCommand("tap", tapMatch.groupValues[1].trim())) status.text = "درخواست لمس ارسال شد."
             return
@@ -1976,7 +1976,7 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
 
     // SMS is sent directly only after Android grants SEND_SMS; otherwise the composer is opened.
     private fun parseSmsRequest(raw: String): Pair<String, String>? {
-        val q = normalize(raw).replace(Regex("[،,؛;]+"), " ").replace(Regex("\\s+"), " ").trim()
+        val q = normalize(raw).replace(Regex("[،,؛;]+"), " ").replace(Regex("\s+"), " ").trim()
         val recipientPatterns = listOf(
             Regex("""به\s+(.+?)\s+(?:پیام\s*(?:بده|بفرست|ارسال\s*کن)|پیامک\s*(?:بده|بفرست|ارسال\s*کن)|اس\s*ام\s*اس\s*(?:بده|بفرست|ارسال\s*کن))"""),
             Regex("""(?:پیام|پیامک)\s+به\s+(.+?)\s+(?:بده|بفرست|ارسال\s+کن)""")
@@ -1999,13 +1999,13 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
         // Normalize Persian ASR punctuation, wake words and polite suffixes before parsing.
         val q = normalize(raw)
             .replace(Regex("[،,؛;.!؟?]+"), " ")
-            .replace(Regex("\\s+"), " ")
+            .replace(Regex("\s+"), " ")
             .trim()
-            .replace(Regex("^(?:(?:هی|سلام)\\s+)?جارویس[\\s،,:-]*"), "")
-            .replace(Regex("^(?:لطفا|لطفاً|خواهشا|خواهشاً)\\s+"), "")
-            .replace(Regex("\\s+(?:لطفا|لطفاً|خواهشا|خواهشاً)$"), "")
+            .replace(Regex("^(?:(?:هی|سلام)\s+)?جارویس[\s،,:-]*"), "")
+            .replace(Regex("^(?:لطفا|لطفاً|خواهشا|خواهشاً)\s+"), "")
+            .replace(Regex("\s+(?:لطفا|لطفاً|خواهشا|خواهشاً)$"), "")
             .trim()
-        // Kotlin raw regex strings use a single backslash (\\s is only for quoted strings).
+        // Kotlin raw regex strings use a single backslash (\s is only for quoted strings).
         val patterns = listOf(
             Regex("""^(?:به|با)\s+(.+?)\s+(?:(?:رو|را)\s+)?(?:زنگ\s+بزن(?:ید)?|تماس\s+بگیر(?:ید)?|تلفن\s+کن(?:ید)?)$"""),
             Regex("""^(.+?)\s+(?:رو|را)\s+(?:تماس\s+بگیر(?:ید)?|زنگ\s+بزن(?:ید)?)$"""),
@@ -2036,7 +2036,7 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
                 val ni = cur.getColumnIndexOrThrow(ContactsContract.CommonDataKinds.Phone.DISPLAY_NAME); val pi = cur.getColumnIndexOrThrow(ContactsContract.CommonDataKinds.Phone.NUMBER)
                 while (cur.moveToNext()) {
                     val name = cur.getString(ni).orEmpty(); val number = cur.getString(pi).orEmpty()
-                    val n = normalize(name).replace(Regex("\\s+"), ""); val t = normalize(recipient).replace(Regex("\\s+"), "")
+                    val n = normalize(name).replace(Regex("\s+"), ""); val t = normalize(recipient).replace(Regex("\s+"), "")
                     val score = when { n == t -> 100; n.startsWith(t) || t.startsWith(n) -> 80; n.contains(t) || t.contains(n) -> 60; else -> 0 }
                     if (score > 0 && number.isNotBlank()) matches.add(Match(name, number, score))
                 }
@@ -2119,7 +2119,7 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
     private fun extractAppLaunchTarget(command: String): String? {
         var q = command.trim()
             .replace(Regex("^(لطفا|لطفاً|خواهشا|خواهشاً|جارویس|jarvis)[،, ]+"), "")
-            .replace(Regex("\\s+"), " ")
+            .replace(Regex("\s+"), " ")
         val openVerbs = listOf("باز کن", "بازکن", "اجرا کن", "اجراکن", "راه اندازی کن", "راه‌اندازی کن", "راه بنداز", "بازش کن", "open", "launch", "start", "run")
         for (verb in openVerbs) {
             if (q.startsWith(verb + " ")) return q.removePrefix(verb).trim()
@@ -2155,7 +2155,7 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
     }
 
     private fun launchAppByName(name: String) {
-        val target = normalize(name).trim().replace(Regex("\\s+"), " ")
+        val target = normalize(name).trim().replace(Regex("\s+"), " ")
         if (target.isBlank()) { reply("نام برنامه را هم بگو"); return }
         val launcher = Intent(Intent.ACTION_MAIN, null).addCategory(Intent.CATEGORY_LAUNCHER)
         val candidates = packageManager.queryIntentActivities(launcher, 0)
@@ -2690,7 +2690,7 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
                         val localPrompt = agentCore.buildLocalPrompt(prompt, conversation)
                         localAi.generate(localPrompt, 96).trim()
                     }
-                    val cleaned = normalizePersianOutput(answer.replace(Regex("<think>[\\s\\S]*?</think>"), "").trim())
+                    val cleaned = normalizePersianOutput(answer.replace(Regex("<think>[\s\\S]*?</think>"), "").trim())
                     if (cleaned.isBlank()) throw IllegalStateException("پاسخ دستیار خالی بود.")
                     runOnUiThread {
                         if (isFinishing || requestId != aiRequestGeneration.get()) return@runOnUiThread
@@ -2776,7 +2776,7 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
 
     private fun normalizePersianOutput(raw: String): String {
         var value = raw.trim()
-        value = value.replace(Regex("(?i)^\\s*(?:sure|okay|ok|of course|certainly|hello|hi)[!,. :—-]+"), "").trim()
+        value = value.replace(Regex("(?i)^\s*(?:sure|okay|ok|of course|certainly|hello|hi)[!,. :—-]+"), "").trim()
         val replacements = listOf(
             "چه کاری می‌توانم برای شما انجام دهم؟" to "چیکار می‌تونم برات انجام بدم؟",
             "هدف شما چیست؟" to "واسه چی می‌خوای؟",
@@ -2843,7 +2843,7 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
     // Remove accidental English conversational fillers before speech playback.
     private fun normalizeJarvisSpeech(raw: String): String {
         var value = raw.trim()
-        val opening = Regex("(?i)^(?:sure|okay|ok|hello|hi there|hi|certainly|of course|well|so)[!,.،:؛\\s-]+")
+        val opening = Regex("(?i)^(?:sure|okay|ok|hello|hi there|hi|certainly|of course|well|so)[!,.،:؛\s-]+")
         repeat(2) {
             val cleaned = opening.replaceFirst(value, "").trimStart()
             if (cleaned != value) value = cleaned
