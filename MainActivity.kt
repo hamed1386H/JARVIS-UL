@@ -40,7 +40,7 @@ import java.util.Locale
 import java.util.concurrent.Executors
 import kotlin.math.roundToInt
 
-// JARVIS 1.4.4: voice settings access and resilient Persian speech handling.
+// JARVIS 1.5.2: self-diagnostics, private crash logging, safe recovery and permission center.
 class MainActivity : Activity(), TextToSpeech.OnInitListener {
     private lateinit var status: TextView
     private lateinit var orbView: JarvisOrbView
