@@ -74,7 +74,12 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
     // Dedicated queue: native model loading must never block online replies.
     private val aiExecutor = Executors.newSingleThreadExecutor()
     private val aiRequestActive = java.util.concurrent.atomic.AtomicBoolean(false)
-    private val pendingAiPrompts = java.util.concurrent.ConcurrentLinkedQueue<String>()
+    private val pendingAiPrompts = java.util.concurrent.ConcurrentLinkedQueue<String>().apply {
+        try {
+            val saved = JSONArray(prefs.getString("pending_ai_prompts", "[]"))
+            for (i in 0 until saved.length()) saved.optString(i).takeIf { it.isNotBlank() }?.let { offer(it) }
+        } catch (_: Exception) {}
+    }
     private val aiRequestGeneration = java.util.concurrent.atomic.AtomicLong(0L)
     @Volatile private var localModelLoading = false
     private val speechWatchdog = android.os.Handler(android.os.Looper.getMainLooper())
@@ -993,7 +998,14 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
         super.onResume()
         activityVisible = true
         updatePermissionStatus()
-        if (::status.isInitialized && isAutomationEnabled()) status.text = "کنترل برنامه‌ها آماده است."
+        if (::status.isInitialized) {
+            val result = prefs.getString("last_automation_result", "").orEmpty()
+            val resultAt = prefs.getLong("last_automation_result_at", 0L)
+            if (result.isNotBlank() && System.currentTimeMillis() - resultAt < 120000L) {
+                status.text = if (result == "success") "آخرین فرمان در برنامه مقصد اجرا شد." else "آخرین فرمان در برنامه مقصد اجرا نشد."
+                prefs.edit().remove("last_automation_result").remove("last_automation_result_at").apply()
+            } else if (isAutomationEnabled()) status.text = "کنترل برنامه‌ها آماده است."
+        }
         if (!automationResultReceiverRegistered) {
             ContextCompat.registerReceiver(this, automationResultReceiver, IntentFilter(JarvisAccessibilityService.ACTION_RESULT), ContextCompat.RECEIVER_NOT_EXPORTED)
             automationResultReceiverRegistered = true
@@ -2051,6 +2063,12 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
     private fun handleCommand(raw: String) {
         val corrected = correctCommandTypos(raw)
         val q = normalize(corrected).trim()
+        if (q.contains("ادامه صف") || q.contains("ادامه کارهای قبلی")) {
+            val next = pendingAiPrompts.poll()
+            persistPendingAiPrompts()
+            if (next != null) askLocal(next) else status.text = "درخواستی در صف باقی نمونده."
+            return
+        }
         if (q.contains("ساکت شو") || q.contains("حرف نزن") || q == "صبر کن" || q.contains("قطع صحبت")) {
             interruptSpeechAndListen()
             return
@@ -2825,6 +2843,7 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
         }
         if (!aiRequestActive.compareAndSet(false, true)) {
             if (prompt.isNotBlank() && pendingAiPrompts.size < 5 && pendingAiPrompts.offer(prompt.take(2500))) {
+                persistPendingAiPrompts()
                 val queued = pendingAiPrompts.size
                 status.text = "درخواستت در صف قرار گرفت؛ نوبت $queued"
                 addLog("JARVIS", "درخواستت در صف قرار گرفت؛ بعد از کار فعلی انجامش می‌دم.")
@@ -2910,6 +2929,7 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
                 } finally {
                     aiRequestActive.set(false)
                     val nextPrompt = pendingAiPrompts.poll()
+                    persistPendingAiPrompts()
                     if (!nextPrompt.isNullOrBlank()) {
                         runOnUiThread {
                             if (!isFinishing) {
@@ -2959,6 +2979,14 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
             .setPositiveButton("تأیید و اجرا") { _, _ -> handleCommand(command) }
             .setNegativeButton("لغو") { _, _ -> reply("اجرای فرمان لغو شد") }
             .show()
+    }
+
+    private fun persistPendingAiPrompts() {
+        try {
+            val saved = JSONArray()
+            pendingAiPrompts.forEach { saved.put(it) }
+            prefs.edit().putString("pending_ai_prompts", saved.toString()).apply()
+        } catch (_: Exception) {}
     }
 
     private fun normalizePersianOutput(raw: String): String {
