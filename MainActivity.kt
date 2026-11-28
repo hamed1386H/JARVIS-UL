@@ -630,9 +630,21 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
             wakeMode = true
             prefs.edit().putBoolean("wake_mode_enabled", true).apply()
             if (isWakeServiceRunning()) stopService(Intent(this, WakeWordService::class.java))
-            window.decorView.postDelayed({ startWakeServiceNow() }, 700)
+            window.decorView.postDelayed({
+                startWakeServiceNow()
+                window.decorView.postDelayed({
+                    if (isWakeServiceRunning()) {
+                        reply("سرویس گوش‌به‌زنگ راه‌اندازی شد. اگر با خاموش شدن صفحه قطع شد، اجازه باتری را هم فعال کن.")
+                    } else {
+                        wakeMode = false
+                        prefs.edit().putBoolean("wake_mode_enabled", false).apply()
+                        recordJarvisError("self_repair_verify",
+                            IllegalStateException("Foreground wake service did not appear in running services after start request"))
+                        reply("تعمیر کامل نشد؛ سرویس گوش‌به‌زنگ بالا نیامد. گزارش خطا ثبت شد؛ گزارش عیب‌یابی را ارسال کن.")
+                    }
+                }, 2500)
+            }, 700)
             if (!localAi.isLoaded() && isValidGguf(localModelFile, 100000000L)) autoLoadLocalModel()
-            reply("حالت آماده‌باش فعال شد؛ سرویس گوش‌به‌زنگ در حال راه‌اندازی مجدد است.")
             offerBatteryUnrestrictedForWake()
         } catch (e: Exception) {
             recordJarvisError("self_repair", e)
