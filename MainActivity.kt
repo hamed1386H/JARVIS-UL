@@ -18,6 +18,8 @@ import android.media.AudioFormat
 import android.media.MediaRecorder
 import android.net.Uri
 import android.os.Bundle
+import android.os.Handler
+import android.os.Looper
 import android.provider.Settings
 import android.provider.ContactsContract
 import android.speech.tts.TextToSpeech
@@ -52,6 +54,8 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
     private lateinit var tts: TextToSpeech
     private var speechRecognizer: SpeechRecognizer? = null
     @Volatile private var androidRecognitionActive = false
+    private val recognitionTimeoutHandler = Handler(Looper.getMainLooper())
+    private var recognitionTimeoutRunnable: Runnable? = null
     private var ttsReady = false
     private var selectedTtsEnginePackage = ""
     @Volatile private var pendingSpeech: String? = null
@@ -612,6 +616,7 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
                 override fun onError(error: Int) {
                     runOnUiThread {
                         if (!androidRecognitionActive || isFinishing) return@runOnUiThread
+                        cancelAndroidRecognitionTimeout()
                         androidRecognitionActive = false
                         destroySpeechRecognizer()
                         status.text = "سرویس گفتار اندروید پاسخ نداد؛ تشخیص آفلاین را امتحان می‌کنم…"
@@ -621,6 +626,7 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
                 override fun onResults(results: Bundle?) {
                     runOnUiThread {
                         if (!androidRecognitionActive || isFinishing) return@runOnUiThread
+                        cancelAndroidRecognitionTimeout()
                         val text = results?.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION)
                             ?.firstOrNull()?.trim().orEmpty()
                         androidRecognitionActive = false
@@ -648,14 +654,31 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
                 putExtra(RecognizerIntent.EXTRA_PREFER_OFFLINE, false)
             }
             recognizer.startListening(intent)
+            cancelAndroidRecognitionTimeout()
+            recognitionTimeoutRunnable = Runnable {
+                if (androidRecognitionActive && !isFinishing) {
+                    androidRecognitionActive = false
+                    destroySpeechRecognizer()
+                    status.text = "سرویس شنیدن آنلاین پاسخ نداد؛ به‌صورت خودکار به شنیدن آفلاین می‌روم…"
+                    startWhisperFallback()
+                }
+            }
+            recognitionTimeoutHandler.postDelayed(recognitionTimeoutRunnable!!, 25000L)
         } catch (e: Exception) {
+            cancelAndroidRecognitionTimeout()
             androidRecognitionActive = false
             destroySpeechRecognizer()
             startWhisperFallback()
         }
     }
 
+    private fun cancelAndroidRecognitionTimeout() {
+        recognitionTimeoutRunnable?.let { recognitionTimeoutHandler.removeCallbacks(it) }
+        recognitionTimeoutRunnable = null
+    }
+
     private fun destroySpeechRecognizer() {
+        cancelAndroidRecognitionTimeout()
         try { speechRecognizer?.cancel() } catch (_: Exception) {}
         try { speechRecognizer?.destroy() } catch (_: Exception) {}
         speechRecognizer = null
@@ -1164,7 +1187,11 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
     }
 
     private fun normalize(s: String): String = s.lowercase(Locale("fa", "IR"))
-        .replace("ي", "ی").replace("ك", "ک").replace("‌", " ").replace("ؤ", "و").replace("۰", "0").replace("۱", "1").replace("۲", "2").replace("۳", "3").replace("۴", "4").replace("۵", "5").replace("۶", "6").replace("۷", "7").replace("۸", "8").replace("۹", "9")
+        .replace("ي", "ی").replace("ى", "ی").replace("ك", "ک").replace("‌", " ")
+        .replace("ؤ", "و").replace("ۀ", "ه").replace("ة", "ه").replace("أ", "ا").replace("إ", "ا").replace("ٱ", "ا")
+        .replace(Regex("[\\u064B-\\u065F\\u0670]"), "")
+        .replace("۰", "0").replace("۱", "1").replace("۲", "2").replace("۳", "3").replace("۴", "4").replace("۵", "5").replace("۶", "6").replace("۷", "7").replace("۸", "8").replace("۹", "9")
+        .replace(Regex("[\\t\\r\\n ]+"), " ").trim()
 
     private fun handleCommand(raw: String) {
         val q = normalize(raw).trim()
