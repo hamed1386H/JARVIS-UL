@@ -73,6 +73,7 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
     private val executor = Executors.newSingleThreadExecutor()
     // Dedicated queue: native model loading must never block online replies.
     private val aiExecutor = Executors.newSingleThreadExecutor()
+    private val prefs by lazy { getSharedPreferences("cht_ai", Context.MODE_PRIVATE) }
     private val aiRequestActive = java.util.concurrent.atomic.AtomicBoolean(false)
     private val pendingAiPrompts = java.util.concurrent.ConcurrentLinkedQueue<String>().apply {
         try {
@@ -87,7 +88,6 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
     private var wakeWasRunningBeforeVoiceSession = false
     // Keep continuous microphone capture/transcription off the AI/model worker queue.
     private val voiceExecutor = Executors.newSingleThreadExecutor()
-    private val prefs by lazy { getSharedPreferences("cht_ai", Context.MODE_PRIVATE) }
     private val requestMic = 102
     private val requestCorePermissions = 103
     private var permissionStatusView: TextView? = null
