@@ -561,7 +561,7 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
             appendLine("Wake mode preference: " + prefs.getBoolean("wake_mode_enabled", false))
             appendLine("Whisper model valid: " + whisperOk + " / bytes=" + whisperModelFile.length())
             appendLine("Local GGUF model valid: " + localOk + " / bytes=" + localModelFile.length())
-            appendLine("TTS ready: " + ttsReady + " / Persian local voice: " + faVoice)
+            appendLine("TTS ready: " + (ttsReady || cloudTts.isConfigured()) + " / local engine ready: " + ttsReady + " / Persian local voice: " + faVoice)
             appendLine("Persian cloud voice configured: " + cloudTts.isConfigured())
             appendLine("Local AI loaded: " + localAi.isLoaded())
             appendLine()
@@ -616,24 +616,46 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
                 reply("برای تعمیر کامل، مجوز میکروفون و اعلان را از صفحه اندروید تأیید کن.")
                 return
             }
-            if (prefs.getBoolean("wake_mode_enabled", false) && whisperModelFile.isFile && whisperModelFile.length() > 15000000L) {
-                stopService(Intent(this, WakeWordService::class.java))
-                window.decorView.postDelayed({ startWakeServiceNow() }, 700)
-            }
-            if (!localAi.isLoaded() && isValidGguf(localModelFile, 100000000L)) autoLoadLocalModel()
             if (!whisperModelFile.isFile || whisperModelFile.length() <= 15000000L) {
+                if (!localAi.isLoaded() && isValidGguf(localModelFile, 100000000L)) autoLoadLocalModel()
                 AlertDialog.Builder(this).setTitle("مدل گفتار نصب نیست")
                     .setMessage("برای فعال شدن گوش‌به‌زنگ، مدل Whisper را از تنظیمات جارویس دانلود کن.")
                     .setPositiveButton("تنظیمات جارویس") { _, _ -> openJarvisSettingsSafely() }
                     .setNegativeButton("بستن", null).show()
-            } else {
-                reply("بررسی انجام شد و سرویس‌های داخلی جارویس برای بازیابی دوباره راه‌اندازی شدند.")
-                showJarvisDiagnostics()
+                return
             }
+
+            // The user explicitly requested hands-free standby. Self-repair restores that
+            // preference and restarts the foreground microphone service while the Activity is visible.
+            wakeMode = true
+            prefs.edit().putBoolean("wake_mode_enabled", true).apply()
+            if (isWakeServiceRunning()) stopService(Intent(this, WakeWordService::class.java))
+            window.decorView.postDelayed({ startWakeServiceNow() }, 700)
+            if (!localAi.isLoaded() && isValidGguf(localModelFile, 100000000L)) autoLoadLocalModel()
+            reply("حالت آماده‌باش فعال شد؛ سرویس گوش‌به‌زنگ در حال راه‌اندازی مجدد است.")
+            offerBatteryUnrestrictedForWake()
         } catch (e: Exception) {
             recordJarvisError("self_repair", e)
             reply("تعمیر خودکار کامل نشد؛ خطا در گزارش داخلی ثبت شد.")
         }
+    }
+
+    private fun offerBatteryUnrestrictedForWake() {
+        if (android.os.Build.VERSION.SDK_INT < 23) return
+        val power = getSystemService(Context.POWER_SERVICE) as android.os.PowerManager
+        if (power.isIgnoringBatteryOptimizations(packageName)) return
+        AlertDialog.Builder(this)
+            .setTitle("اجازه اجرای پایدار در پس‌زمینه")
+            .setMessage("برای اینکه JARVIS هنگام خاموش بودن صفحه و در حالت آماده‌باش متوقف نشود، محدودیت باتری را بردار. اندروید صفحه تأیید خودش را نمایش می‌دهد و تصمیم نهایی با توست.")
+            .setPositiveButton("باز کردن اجازه باتری") { _, _ ->
+                try {
+                    startActivity(Intent(Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS, Uri.parse("package:$packageName")))
+                } catch (_: Exception) {
+                    showBackgroundPersistenceOptions()
+                }
+            }
+            .setNegativeButton("بعداً", null)
+            .show()
     }
 
     private fun showAboutJarvis() {
