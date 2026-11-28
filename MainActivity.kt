@@ -278,7 +278,7 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
         }
         val bottomControls = LinearLayout(this).apply { gravity = Gravity.CENTER; orientation = LinearLayout.HORIZONTAL }
         bottomControls.addView(chatToggle, LinearLayout.LayoutParams(0, dp(48), 1f).apply { marginEnd = dp(8) })
-        bottomControls.addView(actionButton("🎙", "شروع صحبت با میکروفون") { beginListening() }, LinearLayout.LayoutParams(0, dp(52), 1f))
+        bottomControls.addView(actionButton("🎙", "شروع مکالمه صوتی پیوسته؛ برای توقف دوباره همین دکمه را بزن") { toggleVoiceConversation() }, LinearLayout.LayoutParams(0, dp(52), 1f))
         root.addView(bottomControls)
         setContentView(root)
     }
