@@ -120,21 +120,19 @@ class WakeWordService : Service() {
             logWakeEvent("worker starting")
             worker = Thread {
                 var failures = 0
-                while (running.get() && failures < 5) {
+                // Keep recovering from transient microphone/Whisper failures for as long
+                // as the user has left standby enabled; do not silently give up after 5 retries.
+                while (running.get()) {
                     localWakeLoop()
                     if (!running.get()) break
                     failures++
-                    logWakeEvent("wake loop ended unexpectedly; retry " + failures + " of 5")
-                    updateNotification("ارتباط میکروفون قطع شد؛ تلاش مجدد " + failures + " از 5")
-                    try { Thread.sleep((1500L * failures).coerceAtMost(7000L)) }
+                    val delayMs = (1500L * failures).coerceAtMost(15000L)
+                    logWakeEvent("wake loop ended unexpectedly; retry " + failures + " after " + delayMs + " ms")
+                    updateNotification("گوش‌به‌زنگ موقتاً قطع شد؛ بازیابی خودکار شماره " + failures)
+                    try { Thread.sleep(delayMs) }
                     catch (_: InterruptedException) { break }
                 }
-                if (running.get()) {
-                    running.set(false)
-                    logWakeEvent("worker stopped after five failed attempts")
-                    updateNotification("گوش‌به‌زنگ متوقف شد؛ جارویس را باز کن و دوباره فعالش کن")
-                    stopSelf()
-                }
+                logWakeEvent("wake worker loop exited")
             }.also {
                 it.name = "Jarvis-Local-Wake"
                 it.start()
