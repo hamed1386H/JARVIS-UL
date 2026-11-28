@@ -6,7 +6,7 @@ on:
   workflow_dispatch:
   push:
     branches: [ main, master, 'feature/**' ]
-    paths: [ 'JARVIS_v1.3_LocalAI_GitHub.zip', 'MainActivity.kt', 'PersianCloudTts.kt', 'LocalAiEngine.kt', 'JarvisAgentCore.kt', 'JarvisOrbView.kt', 'WhisperEngine.kt', 'jarvis_whisper.cpp', 'jarvis_llama.cpp', 'WakeWordService.kt', 'SmsSentReceiver.kt', 'CMakeLists.txt', 'launcher-res/**', 'build.gradle', '.github/workflows/build.yml' ]
+    paths: [ 'JARVIS_v1.3_LocalAI_GitHub.zip', 'MainActivity.kt', 'PersianCloudTts.kt', 'LocalAiEngine.kt', 'JarvisAgentCore.kt', 'JarvisOrbView.kt', 'WhisperEngine.kt', 'jarvis_whisper.cpp', 'jarvis_llama.cpp', 'WakeWordService.kt', 'SmsSentReceiver.kt', 'JarvisAccessibilityService.kt', 'CMakeLists.txt', 'launcher-res/**', 'build.gradle', '.github/workflows/build.yml' ]
 
 permissions:
   contents: read
