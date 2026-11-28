@@ -538,37 +538,54 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
 
     private fun diagnosticReport(): String {
         fun granted(permission: String) = ContextCompat.checkSelfPermission(this, permission) == PackageManager.PERMISSION_GRANTED
+        fun state(ok: Boolean, good: String = "سالم", bad: String = "نیازمند بررسی") = if (ok) "✓ $good" else "✗ $bad"
         val pm = getSystemService(Context.POWER_SERVICE) as android.os.PowerManager
-        val nm = getSystemService(Context.NOTIFICATION_SERVICE) as android.app.NotificationManager
+        val micOk = granted(Manifest.permission.RECORD_AUDIO)
+        val noticeOk = android.os.Build.VERSION.SDK_INT < 33 || granted(Manifest.permission.POST_NOTIFICATIONS)
+        val contactsOk = granted(Manifest.permission.READ_CONTACTS)
+        val phoneOk = granted(Manifest.permission.CALL_PHONE)
+        val smsOk = granted(Manifest.permission.SEND_SMS)
+        val batteryOk = pm.isIgnoringBatteryOptimizations(packageName)
+        val wakeRunning = isWakeServiceRunning()
+        val wakeWanted = prefs.getBoolean("wake_mode_enabled", false)
         val whisperOk = whisperModelFile.isFile && whisperModelFile.length() > 15000000L
         val localOk = isValidGguf(localModelFile, 100000000L)
         val faVoice = try { tts.voices?.any { it.locale.language == "fa" } == true } catch (_: Exception) { false }
-        val version = try { packageManager.getPackageInfo(packageName, 0).versionName ?: "unknown" } catch (_: Exception) { "unknown" }
+        val outputReady = ttsReady || cloudTts.isConfigured()
+        val speechRecognitionOk = SpeechRecognizer.isRecognitionAvailable(this) || (WhisperEngine.isAvailable() && whisperOk)
+        val textInputOk = ::input.isInitialized
+        val version = try { packageManager.getPackageInfo(packageName, 0).versionName ?: "نامشخص" } catch (_: Exception) { "نامشخص" }
         val logFile = java.io.File(filesDir, "jarvis_diagnostics.log")
+        val errorText = try { if (logFile.isFile) logFile.readText().takeLast(12000) else "خطای ثبت‌شده‌ای وجود ندارد." } catch (_: Exception) { "خواندن فایل خطا ممکن نشد." }
         return buildString {
-            appendLine("JARVIS diagnostic report")
-            appendLine("Version: " + version)
-            appendLine("Device: " + android.os.Build.MANUFACTURER + " " + android.os.Build.MODEL + " / Android " + android.os.Build.VERSION.RELEASE)
-            appendLine("Microphone: " + granted(Manifest.permission.RECORD_AUDIO))
-            appendLine("Notifications: " + (android.os.Build.VERSION.SDK_INT < 33 || granted(Manifest.permission.POST_NOTIFICATIONS)))
-            appendLine("Contacts: " + granted(Manifest.permission.READ_CONTACTS))
-            appendLine("Phone: " + granted(Manifest.permission.CALL_PHONE))
-            appendLine("SMS: " + granted(Manifest.permission.SEND_SMS))
-            appendLine("Modify system settings: " + Settings.System.canWrite(this@MainActivity))
-            appendLine("DND access: " + nm.isNotificationPolicyAccessGranted)
-            appendLine("Battery unrestricted: " + pm.isIgnoringBatteryOptimizations(packageName))
-            appendLine("Wake service running: " + isWakeServiceRunning())
-            appendLine("Wake mode preference: " + prefs.getBoolean("wake_mode_enabled", false))
-            appendLine("Whisper model valid: " + whisperOk + " / bytes=" + whisperModelFile.length())
-            appendLine("Local GGUF model valid: " + localOk + " / bytes=" + localModelFile.length())
-            appendLine("TTS ready: " + (ttsReady || cloudTts.isConfigured()) + " / local engine ready: " + ttsReady + " / Persian local voice: " + faVoice)
-            appendLine("Persian cloud voice configured: " + cloudTts.isConfigured())
-            appendLine("Local AI loaded: " + localAi.isLoaded())
+            appendLine("گزارش عیب‌یابی JARVIS")
+            appendLine("نسخه: $version")
+            appendLine("گوشی: ${android.os.Build.MANUFACTURER} ${android.os.Build.MODEL} / اندروید ${android.os.Build.VERSION.RELEASE}")
             appendLine()
-            appendLine("Recent logged errors:")
-            appendLine(if (logFile.isFile) logFile.readText().takeLast(18000) else "No logged errors.")
+            appendLine("وضعیت بخش‌ها:")
+            appendLine("ورودی متنی و صفحه چت: ${state(textInputOk)}")
+            appendLine("مجوز میکروفون: ${state(micOk)}")
+            appendLine("مجوز اعلان‌ها: ${state(noticeOk)}")
+            appendLine("تشخیص گفتار فارسی: ${state(speechRecognitionOk)}")
+            appendLine("مدل Whisper آفلاین: ${state(whisperOk)} / حجم: ${whisperModelFile.length()} بایت")
+            appendLine("اجرای سرویس گوش‌به‌زنگ: ${state(wakeRunning)}")
+            appendLine("تنظیم گوش‌به‌زنگ: ${state(wakeWanted, "فعال", "خاموش")}")
+            appendLine("محدودیت باتری برداشته شده: ${state(batteryOk)}")
+            appendLine("دسترسی مخاطبین: ${state(contactsOk)}")
+            appendLine("مجوز تماس: ${state(phoneOk)}")
+            appendLine("مجوز ارسال پیامک: ${state(smsOk)}")
+            appendLine("مدل هوش مصنوعی محلی: ${state(localOk)} / بارگذاری‌شده: ${state(localAi.isLoaded())}")
             appendLine()
-            appendLine("Privacy: shared only when the user chooses an app in Android's share sheet.")
+            appendLine("وضعیت صدای خروجی (فقط بررسی؛ تنظیمات صدا تغییر داده نمی‌شود):")
+            appendLine("موتور گفتار آماده: ${state(outputReady)}")
+            appendLine("صدای فارسی نصب‌شده روی گوشی: ${state(faVoice)}")
+            appendLine("صدای فارسی آنلاین تنظیم‌شده: ${state(cloudTts.isConfigured())}")
+            appendLine()
+            appendLine("خطاهای ثبت‌شده اخیر:")
+            appendLine(errorText)
+            appendLine()
+            appendLine("راهنما: علامت ✓ یعنی آن مورد در زمان بررسی در دسترس بوده است؛ علامت ✗ یعنی باید بررسی یا فعال شود.")
+            appendLine("حریم خصوصی: گزارش فقط با انتخاب خودت از طریق اشتراک‌گذاری ارسال می‌شود.")
         }
     }
 
@@ -1702,7 +1719,9 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
             reply("در خدمتم")
             return
         }
-        if (q.contains("عیب یابی") || q.contains("عیب‌یابی") || q.contains("گزارش خطا") || q.contains("سلامت جارویس")) {
+        if (q.contains("عیب یابی") || q.contains("عیب‌یابی") || q.contains("گزارش خطا") ||
+            q.contains("گزارش اشکال") || q.contains("از خودت گزارش بگیر") ||
+            q.contains("سلامت جارویس")) {
             showJarvisDiagnostics()
             return
         }
@@ -1736,7 +1755,7 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
         val smsRequest = parseSmsRequest(raw)
         if (smsRequest != null) { beginContactAction(smsRequest.first, smsRequest.second, "sms"); return }
         if (q.contains("پیام") || q.contains("پیامک") || q.contains("اس ام اس") || q.contains("sms")) {
-            reply("لازم نیست تایپ کنی؛ نام مخاطب و متن پیام را با صدای خودت بگو. مثال: به علی پیام بده، بنویس سلام.")
+            reply("برای انجام پیام، نام مخاطب و متن پیام را کامل بنویس یا بگو. مثال: به علی پیام بده سلام.")
             return
         }
         val requestedApp = extractAppLaunchTarget(q)
@@ -1778,7 +1797,10 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
         val recipientMatch = recipientPatterns.firstNotNullOfOrNull { it.find(q) } ?: return null
         val recipient = recipientMatch.groupValues[1].trim().trim(',', '،', '.', '!')
         val bodyMatch = Regex("""(?:و\s*)?(?:بنویس|متن(?:ش)?(?:\s+این)?(?:\s+باشه)?|بگو|بفرست)\s*[:：،,-]*\s*(.+)$""").find(q)
-        val body = bodyMatch?.groupValues?.get(1)?.trim()?.removePrefix("مثلا ")?.removePrefix("مثلاً ").orEmpty()
+        val trailingBody = q.substring(recipientMatch.range.last + 1)
+            .trim().trimStart('،', ',', ':', '：', '-', ' ')
+        val body = (bodyMatch?.groupValues?.get(1)?.trim()?.takeIf { it.isNotBlank() } ?: trailingBody)
+            .removePrefix("مثلا ").removePrefix("مثلاً ").trim()
         if (recipient.isBlank() || body.isBlank()) {
             reply("نام مخاطب یا متن پیام کامل نیست. مثال: به علی پیام بده، بگو کجایی؟")
             return Pair("", "")
