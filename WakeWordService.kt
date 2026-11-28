@@ -442,7 +442,18 @@ class WakeWordService : Service() {
             speaker = android.speech.tts.TextToSpeech(this) { status ->
                 if (status == android.speech.tts.TextToSpeech.SUCCESS) {
                     try {
-                        speaker?.language = java.util.Locale("fa", "IR")
+                        // Never let Android silently speak Persian text with its English default voice.
+                        val exactFa = speaker?.setLanguage(java.util.Locale.forLanguageTag("fa-IR"))
+                            ?: android.speech.tts.TextToSpeech.LANG_NOT_SUPPORTED
+                        val faResult = if (exactFa < android.speech.tts.TextToSpeech.LANG_AVAILABLE)
+                            speaker?.setLanguage(java.util.Locale("fa"))
+                                ?: android.speech.tts.TextToSpeech.LANG_NOT_SUPPORTED
+                        else exactFa
+                        if (faResult < android.speech.tts.TextToSpeech.LANG_AVAILABLE) {
+                            updateNotification("صدای فارسی نصب نیست؛ بسته گفتار فارسی گوشی را نصب کن")
+                            finished.countDown()
+                            return@TextToSpeech
+                        }
                         speaker?.setSpeechRate(1.08f)
                         speaker?.setOnUtteranceProgressListener(object : android.speech.tts.UtteranceProgressListener() {
                             override fun onStart(id: String?) {}
